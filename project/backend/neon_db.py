@@ -152,6 +152,92 @@ class NeonDB:
         
         return row['id'] if row else None
     
+    async def insert_hazard_detection(
+        self,
+        location: Optional[Dict[str, float]],
+        hazard_type: str,
+        timestamp: datetime,
+        detection_confidence: Optional[float] = None,
+        bounding_box: Optional[list] = None,
+        driver_lane: bool = False,
+        distance_meters: Optional[float] = None,
+        frame_number: Optional[int] = None,
+        video_path: Optional[str] = None,
+        source: str = "websocket"
+    ) -> Optional[int]:
+        """
+        Insert a hazard detection into the database (automatic detection, not user report)
+        
+        Args:
+            location: Dictionary with 'lat' and 'lng' keys (optional)
+            hazard_type: Type of hazard
+            timestamp: Timestamp of the detection
+            detection_confidence: Confidence score of detection
+            bounding_box: Bounding box coordinates [x1, y1, x2, y2]
+            driver_lane: Whether hazard is in driver's lane
+            distance_meters: Distance to hazard in meters
+            frame_number: Frame number in video
+            video_path: Path to video file
+            source: Source of detection (default: "websocket")
+            
+        Returns:
+            The ID of the inserted detection, or None if location is missing
+        """
+        import json
+        
+        # If no location, still store but with NULL location
+        if location:
+            query = """
+                INSERT INTO hazard_detections 
+                (location, hazard_type, timestamp, detection_confidence, bounding_box, 
+                 driver_lane, distance_meters, frame_number, video_path, source)
+                VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                RETURNING id
+            """
+            
+            bbox_json = json.dumps(bounding_box) if bounding_box else None
+            
+            row = await self.execute_fetchone(
+                query,
+                location['lng'],  # PostGIS uses (lng, lat) order
+                location['lat'],
+                hazard_type,
+                timestamp,
+                detection_confidence,
+                bbox_json,
+                driver_lane,
+                distance_meters,
+                frame_number,
+                video_path,
+                source
+            )
+        else:
+            # Store without location
+            query = """
+                INSERT INTO hazard_detections 
+                (location, hazard_type, timestamp, detection_confidence, bounding_box, 
+                 driver_lane, distance_meters, frame_number, video_path, source)
+                VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+                RETURNING id
+            """
+            
+            bbox_json = json.dumps(bounding_box) if bounding_box else None
+            
+            row = await self.execute_fetchone(
+                query,
+                hazard_type,
+                timestamp,
+                detection_confidence,
+                bbox_json,
+                driver_lane,
+                distance_meters,
+                frame_number,
+                video_path,
+                source
+            )
+        
+        return row['id'] if row else None
+    
     async def find_nearby_hazards(
         self,
         location: Dict[str, float],
@@ -171,11 +257,27 @@ class NeonDB:
         """
         cutoff_date = datetime.now() - timedelta(days=days_back)
         
+        # Validate coordinates
+        lat = location.get('lat', 0)
+        lng = location.get('lng', 0)
+        
+        # Check if coordinates might be swapped
+        if abs(lat) > 90 or abs(lng) > 180:
+            # Coordinates might be swapped, auto-correct
+            if abs(lat) <= 180 and abs(lng) <= 90:
+                lat, lng = lng, lat  # Swap them
+        
         query = """
             SELECT 
                 id,
-                ST_Y(location::geometry) as lat,
-                ST_X(location::geometry) as lng,
+                CASE 
+                    WHEN location IS NOT NULL THEN ST_Y(location::geometry)
+                    ELSE NULL
+                END as lat,
+                CASE 
+                    WHEN location IS NOT NULL THEN ST_X(location::geometry)
+                    ELSE NULL
+                END as lng,
                 hazard_type,
                 timestamp,
                 map_link,
@@ -183,8 +285,9 @@ class NeonDB:
                 status,
                 created_at
             FROM hazard_reports
-            WHERE ST_DWithin(
-                location::geometry,
+            WHERE location IS NOT NULL
+            AND ST_DWithin(
+                location::geography,
                 ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
                 $3
             )
@@ -194,8 +297,8 @@ class NeonDB:
         
         return await self.execute_query(
             query,
-            location['lng'],  # PostGIS uses (lng, lat) order
-            location['lat'],
+            lng,  # PostGIS uses (lng, lat) order
+            lat,
             radius_meters,
             cutoff_date
         )
@@ -205,8 +308,14 @@ class NeonDB:
         query = """
             SELECT 
                 id,
-                ST_Y(location::geometry) as lat,
-                ST_X(location::geometry) as lng,
+                CASE 
+                    WHEN location IS NOT NULL THEN ST_Y(location::geometry)
+                    ELSE NULL
+                END as lat,
+                CASE 
+                    WHEN location IS NOT NULL THEN ST_X(location::geometry)
+                    ELSE NULL
+                END as lng,
                 hazard_type,
                 timestamp,
                 map_link,
@@ -224,8 +333,14 @@ class NeonDB:
         query = """
             SELECT 
                 id,
-                ST_Y(location::geometry) as lat,
-                ST_X(location::geometry) as lng,
+                CASE 
+                    WHEN location IS NOT NULL THEN ST_Y(location::geometry)
+                    ELSE NULL
+                END as lat,
+                CASE 
+                    WHEN location IS NOT NULL THEN ST_X(location::geometry)
+                    ELSE NULL
+                END as lng,
                 hazard_type,
                 timestamp,
                 map_link,

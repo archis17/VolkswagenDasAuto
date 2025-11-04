@@ -10,7 +10,11 @@ from config import DETECTION_THRESHOLDS  # Import the thresholds from config
 from distance_estimator import DistanceEstimator
 from concurrent.futures import ThreadPoolExecutor
 import time
-from typing import Optional
+from typing import Optional, Dict
+from datetime import datetime
+import json
+from gps_extractor import gps_extractor
+from neon_db import neon_db
 
 # Import detection mode from mode_state
 import mode_state
@@ -49,8 +53,53 @@ async def websocket_endpoint(websocket: WebSocket):
     frame_count = 0
     skip_count = 0
     pending_frame = None
+    current_gps = None  # GPS location from client
+    frame_number = 0
     
     try:
+        # Start receiving messages (including GPS updates)
+        async def receive_messages():
+            nonlocal current_gps
+            while True:
+                try:
+                    # Receive message - could be text (JSON) or bytes
+                    message = await websocket.receive()
+                    
+                    # Handle text messages (JSON)
+                    if 'text' in message:
+                        data = json.loads(message['text'])
+                        # Handle GPS updates from client
+                        if 'gps' in data:
+                            gps_data = data['gps']
+                            if 'lat' in gps_data and 'lng' in gps_data:
+                                gps_extractor.set_gps_location(
+                                    gps_data['lat'],
+                                    gps_data['lng']
+                                )
+                                current_gps = gps_data
+                                # Verify coordinate order: latitude should be between -90 and 90, longitude between -180 and 180
+                                lat = gps_data['lat']
+                                lng = gps_data['lng']
+                                if abs(lat) > 90 or abs(lng) > 180:
+                                    # Coordinates might be swapped
+                                    print(f"⚠️ Warning: GPS coordinates may be swapped! Received: lat={lat:.6f}, lng={lng:.6f}")
+                                    # Auto-correct if swapped
+                                    if abs(lat) <= 180 and abs(lng) <= 90:
+                                        print(f"🔄 Auto-correcting swapped coordinates")
+                                        current_gps = {'lat': lng, 'lng': lat}
+                                        gps_extractor.set_gps_location(lng, lat)
+                                else:
+                                    print(f"📍 GPS updated: lat={lat:.6f}, lng={lng:.6f}")
+                    # Ignore binary messages (video frames from client)
+                    elif 'bytes' in message:
+                        pass
+                except Exception as e:
+                    # Connection closed or error
+                    break
+        
+        # Start receiving messages in background
+        receive_task = asyncio.create_task(receive_messages())
+        
         while True:
             loop_start = time.time()
             current_mode = get_current_mode()
@@ -84,8 +133,30 @@ async def websocket_endpoint(websocket: WebSocket):
             
             # Process frame if available
             if frame is not None:
+                frame_number += 1
+                
+                # Get GPS location (priority: client GPS > GPS extractor > frame metadata)
+                gps_location = current_gps
+                if not gps_location:
+                    gps_location = gps_extractor.get_current_gps()
+                if not gps_location:
+                    # Try to extract from frame
+                    video_path = video_file_manager.video_path if current_mode == "video" else None
+                    gps_location = gps_extractor.extract_from_frame(frame, video_path)
+                
                 # Process the frame with both YOLO models
                 results, driver_lane_hazard_count, vis_frame, hazard_distances = process_frame_with_models(frame)
+                
+                # Store detections with GPS in database
+                if results and len(results) > 0:
+                    await store_hazard_detections(
+                        results=results,
+                        driver_lane_hazard_count=driver_lane_hazard_count,
+                        hazard_distances=hazard_distances,
+                        gps_location=gps_location,
+                        frame_number=frame_number,
+                        current_mode=current_mode
+                    )
                 
                 # Encode frame asynchronously in thread pool
                 jpeg_bytes = await asyncio.get_event_loop().run_in_executor(
@@ -118,7 +189,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             "hazard_distances": hazard_distances,
                             "hazard_type": "pothole" if pothole_detected else "",
                             "mode": current_mode,
-                            "video_progress": video_progress
+                            "video_progress": video_progress,
+                            "gps_available": gps_location is not None
                         })
                         
                         frame_count += 1
@@ -138,11 +210,76 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         print(f"WebSocket error: {str(e)}")
     finally:
+        # Cancel receive task
+        if 'receive_task' in locals():
+            receive_task.cancel()
         # Cleanup
         try:
             await websocket.close()
         except:
             pass
+
+
+async def store_hazard_detections(
+    results: list,
+    driver_lane_hazard_count: int,
+    hazard_distances: list,
+    gps_location: Optional[Dict[str, float]],
+    frame_number: int,
+    current_mode: str
+):
+    """Store hazard detections with GPS in database"""
+    if not neon_db._pool:
+        await neon_db.connect()
+    
+    try:
+        # Validate and correct GPS coordinates if needed
+        validated_gps = None
+        if gps_location:
+            lat = gps_location.get('lat', 0)
+            lng = gps_location.get('lng', 0)
+            
+            # Check if coordinates might be swapped
+            if abs(lat) > 90 or abs(lng) > 180:
+                if abs(lat) <= 180 and abs(lng) <= 90:
+                    # Coordinates are swapped, correct them
+                    validated_gps = {'lat': lng, 'lng': lat}
+                    print(f"🔄 GPS coordinates corrected: {lat:.6f},{lng:.6f} → {lng:.6f},{lat:.6f}")
+                else:
+                    validated_gps = None  # Invalid coordinates
+            else:
+                validated_gps = gps_location
+        
+        for i, detection in enumerate(results):
+            hazard_type = detection.get('type', detection.get('class_name', 'unknown'))
+            confidence = detection.get('conf', 0.0)
+            bounding_box = detection.get('box', None)
+            
+            # Get distance if available
+            distance = None
+            is_driver_lane = False
+            if i < len(hazard_distances):
+                distance = hazard_distances[i].get('distance')
+                is_driver_lane = hazard_distances[i].get('inDriverLane', False)
+            
+            # Store detection in database with validated GPS
+            await neon_db.insert_hazard_detection(
+                location=validated_gps,
+                hazard_type=hazard_type,
+                timestamp=datetime.now(),
+                detection_confidence=confidence,
+                bounding_box=bounding_box,
+                driver_lane=is_driver_lane,
+                distance_meters=distance,
+                frame_number=frame_number,
+                video_path=video_file_manager.video_path if current_mode == "video" else None,
+                source="websocket"
+            )
+    except Exception as e:
+        # Don't fail the entire process if database storage fails
+        import traceback
+        print(f"Error storing hazard detection: {e}")
+        print(traceback.format_exc())
 
 # Initialize the distance estimator
 distance_estimator = DistanceEstimator()

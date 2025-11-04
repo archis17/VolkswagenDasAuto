@@ -36,19 +36,32 @@ export default function LiveMode() {
     };
   }, []);
 
-  // Get current location
+  // Get current location and send to WebSocket
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(
         (position) => {
-          setCurrentLocation({
+          const newLocation = {
             lat: position.coords.latitude,
             lng: position.coords.longitude
-          });
+          };
+          setCurrentLocation(newLocation);
+          
+          // Send GPS to WebSocket server if connected
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+              gps: newLocation
+            }));
+          }
         },
         (error) => {
           console.error("Error getting location:", error);
           toast.warning("Location access is needed for hazard reporting");
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 5000,  // Accept cached position up to 5 seconds old
+          timeout: 10000
         }
       );
     } else {
@@ -77,6 +90,16 @@ export default function LiveMode() {
 
     wsRef.current.onopen = () => {
       setIsConnected(true);
+      
+      // Send GPS location to server when WebSocket opens
+      if (currentLocation) {
+        wsRef.current.send(JSON.stringify({
+          gps: {
+            lat: currentLocation.lat,
+            lng: currentLocation.lng
+          }
+        }));
+      }
     };
 
     wsRef.current.onmessage = (e) => {

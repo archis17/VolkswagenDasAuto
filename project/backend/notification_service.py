@@ -80,7 +80,17 @@ async def send_hazard_notification(notification: HazardNotification = Body(...))
         redis_client.store_hazard_key(hash_key, ttl=1800)
         
         # Generate Google Maps link using received coordinates
-        map_link = f"https://www.google.com/maps/search/?api=1&query={notification.location['lat']},{notification.location['lng']}"
+        # Google Maps uses lat,lng format
+        lat = notification.location['lat']
+        lng = notification.location['lng']
+        
+        # Validate coordinates
+        if abs(lat) > 90 or abs(lng) > 180:
+            # Coordinates might be swapped
+            if abs(lat) <= 180 and abs(lng) <= 90:
+                lat, lng = lng, lat  # Swap them
+        
+        map_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
         
         # Ensure database connection
         if not neon_db._pool:
@@ -175,15 +185,25 @@ async def get_hazard_reports():
         # Fetch all reports from PostGIS
         reports = await neon_db.get_all_hazards(limit=1000)
         
-        # Convert timestamps to ISO format for JSON serialization
+        # Convert timestamps to ISO format for JSON serialization and handle None values
         for report in reports:
-            if 'timestamp' in report and isinstance(report['timestamp'], datetime):
-                report['timestamp'] = report['timestamp'].isoformat()
-            if 'created_at' in report and isinstance(report['created_at'], datetime):
-                report['created_at'] = report['created_at'].isoformat()
+            if 'timestamp' in report and report['timestamp'] is not None:
+                if isinstance(report['timestamp'], datetime):
+                    report['timestamp'] = report['timestamp'].isoformat()
+            if 'created_at' in report and report['created_at'] is not None:
+                if isinstance(report['created_at'], datetime):
+                    report['created_at'] = report['created_at'].isoformat()
+            # Ensure lat/lng are floats or None
+            if 'lat' in report:
+                report['lat'] = float(report['lat']) if report['lat'] is not None else None
+            if 'lng' in report:
+                report['lng'] = float(report['lng']) if report['lng'] is not None else None
         
         return reports
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error fetching hazard reports: {error_details}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch hazard reports: {str(e)}")
 
 @router.delete("/cleanup-resolved-hazards")
