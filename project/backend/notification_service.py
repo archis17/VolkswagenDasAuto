@@ -3,20 +3,17 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
-from pymongo import MongoClient
 from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel
 from typing import Dict
 from dotenv import load_dotenv
 import asyncio
+from redis_client import redis_client
+from hazard_hash import generate_time_bounded_hash
+from neon_db import neon_db
 
 # Load environment variables
 load_dotenv()
-
-# MongoDB connection
-mongo_client = MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-db = mongo_client["road_hazards"]
-hazard_reports = db["hazard_reports"]
 
 # Email configuration
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
@@ -40,32 +37,64 @@ async def send_hazard_notification(notification: HazardNotification = Body(...))
         # Only process pothole notifications
         if notification.type.lower() != "pothole":
             return {"success": False, "message": "Only pothole hazards are reported to authorities"}
-            
-        # Check for an existing report (approx. 100m radius)
-        existing_report = hazard_reports.find_one({
-            "location.lat": {"$gte": notification.location["lat"] - 0.001, "$lte": notification.location["lat"] + 0.001},
-            "location.lng": {"$gte": notification.location["lng"] - 0.001, "$lte": notification.location["lng"] + 0.001},
-        })
         
-        if existing_report:
-            report_time = existing_report.get("timestamp", datetime.min)
-            if isinstance(report_time, str):
-                report_time = datetime.fromisoformat(report_time.replace('Z', '+00:00'))
-            days_difference = (datetime.now() - report_time).days
-            if days_difference < 7:
-                return {"success": False, "message": "Recent report exists for this location"}
+        # Generate hash key for duplicate detection
+        hash_key = generate_time_bounded_hash(
+            location=notification.location,
+            hazard_type=notification.type,
+            timestamp=notification.timestamp,
+            time_window_minutes=5  # 5-minute window for duplicates
+        )
+        
+        # Check Redis for duplicate (fast lookup)
+        if redis_client.check_duplicate(hash_key):
+            return {
+                "success": False,
+                "message": "Duplicate hazard detected (already processed recently)",
+                "duplicate": True
+            }
+        
+        # Check PostGIS for existing report within 100m radius (fallback)
+        nearby_hazards = await neon_db.find_nearby_hazards(
+            location=notification.location,
+            radius_meters=100.0,
+            days_back=7
+        )
+        
+        if nearby_hazards:
+            # Check if any nearby hazard is recent (within 7 days)
+            for hazard in nearby_hazards:
+                hazard_time = hazard.get('timestamp')
+                if isinstance(hazard_time, str):
+                    hazard_time = datetime.fromisoformat(hazard_time.replace('Z', '+00:00'))
+                elif isinstance(hazard_time, datetime):
+                    pass
+                else:
+                    continue
+                
+                days_difference = (datetime.now(hazard_time.tzinfo) - hazard_time).days
+                if days_difference < 7:
+                    return {"success": False, "message": "Recent report exists for this location"}
+        
+        # Store hash key in Redis (30 minute TTL)
+        redis_client.store_hazard_key(hash_key, ttl=1800)
         
         # Generate Google Maps link using received coordinates
         map_link = f"https://www.google.com/maps/search/?api=1&query={notification.location['lat']},{notification.location['lng']}"
         
-        # Store in MongoDB without image_url field
-        report_id = hazard_reports.insert_one({
-            "location": notification.location,
-            "timestamp": notification.timestamp,
-            "type": notification.type,
-            "map_link": map_link,
-            "status": "reported"
-        }).inserted_id
+        # Ensure database connection
+        if not neon_db._pool:
+            await neon_db.connect()
+        
+        # Store in PostGIS database
+        report_id = await neon_db.insert_hazard_report(
+            location=notification.location,
+            hazard_type=notification.type,
+            timestamp=notification.timestamp,
+            map_link=map_link,
+            hash_key=hash_key,
+            status="reported"
+        )
         
         # Send email notification with the map link
         await send_email_to_authority(notification, str(report_id), map_link)
@@ -139,17 +168,19 @@ def _send_smtp_email(host, port, user, password, sender, recipient, message):
 async def get_hazard_reports():
     """Get all hazard reports from the database"""
     try:
-        # Fetch all reports, sort by timestamp descending (newest first)
-        reports = list(hazard_reports.find({}, {'_id': 0}).sort('timestamp', -1))
+        # Ensure database connection
+        if not neon_db._pool:
+            await neon_db.connect()
         
-        # Convert ObjectId to string for JSON serialization
+        # Fetch all reports from PostGIS
+        reports = await neon_db.get_all_hazards(limit=1000)
+        
+        # Convert timestamps to ISO format for JSON serialization
         for report in reports:
-            if '_id' in report:
-                report['_id'] = str(report['_id'])
-            
-            # Ensure timestamp is serializable
             if 'timestamp' in report and isinstance(report['timestamp'], datetime):
                 report['timestamp'] = report['timestamp'].isoformat()
+            if 'created_at' in report and isinstance(report['created_at'], datetime):
+                report['created_at'] = report['created_at'].isoformat()
         
         return reports
     except Exception as e:
@@ -159,28 +190,12 @@ async def get_hazard_reports():
 async def cleanup_resolved_hazards():
     """Remove hazard reports that are older than 7 days and have no recent reports in the same location"""
     try:
-        # Get the cutoff date (7 days ago)
-        cutoff_date = datetime.now() - timedelta(days=7)
+        # Ensure database connection
+        if not neon_db._pool:
+            await neon_db.connect()
         
-        # Find all reports older than 7 days
-        old_reports = list(hazard_reports.find({
-            "timestamp": {"$lt": cutoff_date}
-        }))
-        
-        removed_count = 0
-        
-        for report in old_reports:
-            # For each old report, check if there's a newer report within 100m
-            has_newer_report = hazard_reports.find_one({
-                "location.lat": {"$gte": report["location"]["lat"] - 0.001, "$lte": report["location"]["lat"] + 0.001},
-                "location.lng": {"$gte": report["location"]["lng"] - 0.001, "$lte": report["location"]["lng"] + 0.001},
-                "timestamp": {"$gte": cutoff_date}
-            })
-            
-            # If no newer report exists, remove this old report
-            if not has_newer_report:
-                hazard_reports.delete_one({"_id": report["_id"]})
-                removed_count += 1
+        # Use PostGIS cleanup method
+        removed_count = await neon_db.cleanup_old_hazards(days=7)
         
         return {
             "success": True, 
@@ -196,15 +211,30 @@ async def cleanup_resolved_hazards():
 async def delete_hazard_report(report_id: str):
     """Delete a specific hazard report by ID"""
     try:
-        from bson.objectid import ObjectId
+        # Ensure database connection
+        if not neon_db._pool:
+            await neon_db.connect()
         
-        # Convert string ID to MongoDB ObjectId
-        result = hazard_reports.delete_one({"_id": ObjectId(report_id)})
+        # Convert string ID to integer
+        try:
+            report_id_int = int(report_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid report ID format: {report_id}")
         
-        if result.deleted_count == 0:
+        # Check if report exists
+        report = await neon_db.get_hazard_by_id(report_id_int)
+        if not report:
             raise HTTPException(status_code=404, detail=f"Hazard report with ID {report_id} not found")
         
-        return {"success": True, "message": f"Hazard report {report_id} deleted successfully"}
+        # Delete the report
+        deleted = await neon_db.delete_hazard(report_id_int)
+        
+        if deleted:
+            return {"success": True, "message": f"Hazard report {report_id} deleted successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete hazard report")
     
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete hazard report: {str(e)}")

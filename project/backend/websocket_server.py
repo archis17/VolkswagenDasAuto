@@ -8,67 +8,141 @@ from video_file_manager import video_file_manager
 from model_loader import road_model, standard_model
 from config import DETECTION_THRESHOLDS  # Import the thresholds from config
 from distance_estimator import DistanceEstimator
+from concurrent.futures import ThreadPoolExecutor
+import time
+from typing import Optional
 
 # Import detection mode from mode_state
 import mode_state
+
+# Thread pool for CPU-intensive operations
+executor = ThreadPoolExecutor(max_workers=2)
+
+# WebSocket configuration
+TARGET_FPS = 15  # Reduced from 30 to 15 for better performance
+FRAME_INTERVAL = 1.0 / TARGET_FPS  # ~0.067 seconds
+JPEG_QUALITY = 75  # Reduced from 80 for smaller file size
+MAX_QUEUE_SIZE = 2  # Maximum frames to queue before dropping
+FRAME_SKIP_THRESHOLD = 0.1  # Skip frame if encoding takes longer than this
 
 def get_current_mode():
     """Get the current detection mode"""
     return mode_state.detection_mode
 
+def encode_frame_sync(frame, quality=JPEG_QUALITY):
+    """Synchronous frame encoding (runs in thread pool)"""
+    try:
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
+        success, jpeg = cv2.imencode('.jpg', frame, encode_params)
+        if success:
+            return jpeg.tobytes()
+        return None
+    except Exception as e:
+        print(f"Frame encoding error: {e}")
+        return None
+
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    
+    # Performance tracking
+    last_frame_time = time.time()
+    frame_count = 0
+    skip_count = 0
+    pending_frame = None
+    
     try:
         while True:
-            frame = None
+            loop_start = time.time()
             current_mode = get_current_mode()
+            frame = None
             
-            # Get frame based on current mode
+            # Get frame based on current mode (non-blocking)
             if current_mode == "video":
                 # Get frame from video file manager
                 if not video_file_manager.frame_queue.empty():
-                    frame = video_file_manager.frame_queue.get()
+                    # Skip frames if queue is backing up
+                    while video_file_manager.frame_queue.qsize() > MAX_QUEUE_SIZE:
+                        try:
+                            video_file_manager.frame_queue.get_nowait()
+                            skip_count += 1
+                        except:
+                            break
+                    if not video_file_manager.frame_queue.empty():
+                        frame = video_file_manager.frame_queue.get()
             else:
                 # Get frame from camera manager (live mode)
-                # Only try if camera is available
                 if camera_manager.camera_available and not camera_manager.frame_queue.empty():
-                    frame = camera_manager.frame_queue.get()
+                    # Skip frames if queue is backing up
+                    while camera_manager.frame_queue.qsize() > MAX_QUEUE_SIZE:
+                        try:
+                            camera_manager.frame_queue.get_nowait()
+                            skip_count += 1
+                        except:
+                            break
+                    if not camera_manager.frame_queue.empty():
+                        frame = camera_manager.frame_queue.get()
             
             # Process frame if available
             if frame is not None:
                 # Process the frame with both YOLO models
                 results, driver_lane_hazard_count, vis_frame, hazard_distances = process_frame_with_models(frame)
                 
-                # Send processed frame and results
-                _, jpeg = cv2.imencode('.jpg', vis_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                await websocket.send_bytes(jpeg.tobytes())
+                # Encode frame asynchronously in thread pool
+                jpeg_bytes = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    encode_frame_sync,
+                    vis_frame,
+                    JPEG_QUALITY
+                )
                 
-                # Send both total and driver lane hazard counts
-                total_hazard_count = len(results)
-                
-                # Check if any detection is a pothole
-                pothole_detected = any(detection.get('type', '').lower() == 'pothole' for detection in results)
-                
-                # Get video progress if in video mode
-                video_progress = None
-                if current_mode == "video" and video_file_manager.is_active():
-                    video_progress = video_file_manager.get_progress()
-                
-                await websocket.send_json({
-                    "hazard_count": total_hazard_count,
-                    "driver_lane_hazard_count": driver_lane_hazard_count,
-                    "hazard_distances": hazard_distances,
-                    "hazard_type": "pothole" if pothole_detected else "",
-                    "mode": current_mode,
-                    "video_progress": video_progress
-                })
+                if jpeg_bytes:
+                    try:
+                        # Send processed frame
+                        await websocket.send_bytes(jpeg_bytes)
+                        
+                        # Send both total and driver lane hazard counts
+                        total_hazard_count = len(results)
+                        
+                        # Check if any detection is a pothole
+                        pothole_detected = any(detection.get('type', '').lower() == 'pothole' for detection in results)
+                        
+                        # Get video progress if in video mode
+                        video_progress = None
+                        if current_mode == "video" and video_file_manager.is_active():
+                            video_progress = video_file_manager.get_progress()
+                        
+                        # Send JSON data
+                        await websocket.send_json({
+                            "hazard_count": total_hazard_count,
+                            "driver_lane_hazard_count": driver_lane_hazard_count,
+                            "hazard_distances": hazard_distances,
+                            "hazard_type": "pothole" if pothole_detected else "",
+                            "mode": current_mode,
+                            "video_progress": video_progress
+                        })
+                        
+                        frame_count += 1
+                        last_frame_time = time.time()
+                        
+                    except Exception as e:
+                        print(f"WebSocket send error: {e}")
+                        break  # Break on send error
             
-            await asyncio.sleep(0.033)
+            # Adaptive sleep based on actual frame processing time
+            elapsed = time.time() - loop_start
+            sleep_time = max(0.001, FRAME_INTERVAL - elapsed)
+            await asyncio.sleep(sleep_time)
             
     except WebSocketDisconnect:
-        print("Client disconnected")
+        print(f"Client disconnected (sent {frame_count} frames, skipped {skip_count} frames)")
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"WebSocket error: {str(e)}")
+    finally:
+        # Cleanup
+        try:
+            await websocket.close()
+        except:
+            pass
 
 # Initialize the distance estimator
 distance_estimator = DistanceEstimator()

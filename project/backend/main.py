@@ -8,15 +8,54 @@ import uvicorn
 import os
 import shutil
 from typing import Optional
+from contextlib import asynccontextmanager
 
 from camera_manager import camera_manager
 from video_file_manager import video_file_manager
 from websocket_server import websocket_endpoint
 from model_loader import road_model, standard_model  # Updated import
 from notification_service import router as notification_router
+from redis_client import redis_client
+from neon_db import neon_db
 import mode_state
+import asyncio
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events"""
+    # Startup
+    print("🚀 Starting application...")
+    
+    # Initialize Neon DB connection
+    try:
+        await neon_db.connect()
+        print("✅ Neon DB connected on startup")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not connect to Neon DB on startup: {e}")
+        print("   Database operations will connect on-demand")
+    
+    # Check Redis connection (silent failure is OK)
+    if not redis_client.is_connected():
+        print("⚠️  Warning: Redis is not connected. Duplicate detection will use database fallback.")
+        print("   To enable Redis, start Redis server or configure connection in .env")
+    else:
+        print("✅ Redis connected on startup")
+    
+    yield
+    
+    # Shutdown
+    print("🛑 Shutting down application...")
+    
+    # Close Neon DB connection
+    try:
+        await neon_db.disconnect()
+        print("✅ Neon DB disconnected on shutdown")
+    except Exception as e:
+        print(f"⚠️  Warning: Error disconnecting from Neon DB: {e}")
+
+
+app = FastAPI(lifespan=lifespan)
 
 # Add CORS middleware
 app.add_middleware(
@@ -124,6 +163,36 @@ async def stop_video():
     mode_state.detection_mode = "live"
     
     return JSONResponse({"success": True, "mode": "live"})
+
+@app.get("/api/redis/status")
+async def get_redis_status():
+    """Get Redis connection status and statistics"""
+    stats = redis_client.get_stats()
+    return JSONResponse(stats)
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for all services"""
+    db_connected = False
+    try:
+        db_connected = await neon_db.check_connection()
+    except:
+        pass
+    
+    return JSONResponse({
+        "status": "healthy",
+        "redis": redis_client.is_connected(),
+        "database": db_connected,
+        "mode": mode_state.detection_mode,
+        "camera_available": camera_manager.camera_available,
+        "video_active": video_file_manager.is_active() if hasattr(video_file_manager, 'is_active') else False
+    })
+
+@app.get("/api/database/status")
+async def get_database_status():
+    """Get Neon DB connection status and statistics"""
+    stats = await neon_db.get_stats()
+    return JSONResponse(stats)
 
 # WebSocket Route
 app.websocket("/ws")(websocket_endpoint)
