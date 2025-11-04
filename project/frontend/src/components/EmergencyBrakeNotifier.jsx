@@ -7,8 +7,8 @@ export default function EmergencyBrakeNotifier({ hazardDistances = [], driverLan
   const [activeHazards, setActiveHazards] = useState([]);
   
   useEffect(() => {
-    // Initialize emergency brake sound
-    emergencyBrakeAudioRef.current = new Audio('/emergency-brake.mp3');
+    // Initialize emergency brake sound (updated track)
+    emergencyBrakeAudioRef.current = new Audio('/volkswagen-das-auto-remix.mp3');
     emergencyBrakeAudioRef.current.loop = false;
     
     return () => {

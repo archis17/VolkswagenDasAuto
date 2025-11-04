@@ -11,7 +11,10 @@ export default function NearbyHazardNotifier({ currentLocation }) {
     
     const checkNearbyPotholes = async () => {
       try {
-        const response = await fetch('/api/hazard-reports');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const response = await fetch('/api/hazard-reports', { signal: controller.signal, cache: 'no-store' });
+        clearTimeout(timeoutId);
         if (!response.ok) throw new Error('Failed to fetch pothole data');
         
         const potholes = await response.json();
@@ -45,7 +48,9 @@ export default function NearbyHazardNotifier({ currentLocation }) {
           );
         }
       } catch (error) {
-        console.error("Error checking nearby potholes:", error);
+        if (error.name !== 'AbortError') {
+          console.error("Error checking nearby potholes:", error);
+        }
       }
     };
     

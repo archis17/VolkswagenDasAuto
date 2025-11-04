@@ -22,6 +22,8 @@ export default function LiveMode() {
   const [detectionMode, setDetectionMode] = useState('live');
   const [videoProgress, setVideoProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [fps, setFps] = useState(0);
+  const frameCounterRef = useRef({ count: 0, lastTs: performance.now() });
 
   // Initialize alert sound
   useEffect(() => {
@@ -56,9 +58,10 @@ export default function LiveMode() {
     }
   }, []);
 
-  const connectWebSocket = () => {
+  const connectWebSocket = (retry = 0) => {
     if (wsRef.current) {
-      wsRef.current.close();
+      try { wsRef.current.onopen = null; wsRef.current.onmessage = null; wsRef.current.onerror = null; wsRef.current.onclose = null; } catch {}
+      try { wsRef.current.close(); } catch {}
     }
 
     // Use proxy in development (Vite dev server), direct connection in production
@@ -74,6 +77,8 @@ export default function LiveMode() {
     }
     
     wsRef.current = new WebSocket(wsURL);
+    // Prefer ArrayBuffer to cut Blob overhead
+    try { wsRef.current.binaryType = 'arraybuffer'; } catch {}
 
     wsRef.current.onopen = () => {
       setIsConnected(true);
@@ -82,6 +87,8 @@ export default function LiveMode() {
     wsRef.current.onmessage = (e) => {
       if (typeof e.data === 'string') {
         try {
+          // Ignore keepalive pings
+          if (e.data === 'ping') return;
           const parsedData = JSON.parse(e.data);
           const driverLaneHazardCount = parsedData.driver_lane_hazard_count;
           const hazardDistances = parsedData.hazard_distances || [];
@@ -140,32 +147,74 @@ export default function LiveMode() {
         } catch (err) {
           console.error("WebSocket JSON Error:", err);
         }
-      } else if (e.data instanceof Blob) {
-        const url = URL.createObjectURL(e.data);
-        let processedImg = document.getElementById('processed-feed');
-        if (!processedImg) {
-          processedImg = document.createElement('img');
-          processedImg.id = 'processed-feed';
-          processedImg.className = 'processed-feed';
-          videoRef.current.after(processedImg);
+      } else if (e.data instanceof ArrayBuffer || e.data instanceof Blob) {
+        const blob = e.data instanceof Blob ? e.data : new Blob([e.data], { type: 'image/jpeg' });
+        let canvas = document.getElementById('processed-canvas');
+        if (!canvas) {
+          canvas = document.createElement('canvas');
+          canvas.id = 'processed-canvas';
+          canvas.className = 'processed-feed';
+          videoRef.current.after(canvas);
         }
-        
-        if (processedImg.src) {
-          URL.revokeObjectURL(processedImg.src);
-        }
-        processedImg.src = url;
+        const ctx = canvas.getContext('2d');
+        // Use createImageBitmap for faster decode and draw
+        createImageBitmap(blob).then((bitmap) => {
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+          }
+          ctx.drawImage(bitmap, 0, 0);
+          bitmap.close();
+
+          // FPS estimation
+          const fc = frameCounterRef.current;
+          fc.count += 1;
+          const now = performance.now();
+          if (now - fc.lastTs >= 1000) {
+            setFps(fc.count);
+            fc.count = 0;
+            fc.lastTs = now;
+          }
+        }).catch(() => {
+          // Fallback path if createImageBitmap not supported
+          const img = new Image();
+          img.onload = () => {
+            if (canvas.width !== img.width || canvas.height !== img.height) {
+              canvas.width = img.width;
+              canvas.height = img.height;
+            }
+            ctx.drawImage(img, 0, 0);
+
+            const fc = frameCounterRef.current;
+            fc.count += 1;
+            const now = performance.now();
+            if (now - fc.lastTs >= 1000) {
+              setFps(fc.count);
+              fc.count = 0;
+              fc.lastTs = now;
+            }
+          };
+          img.src = URL.createObjectURL(blob);
+        });
       }
     };
 
     wsRef.current.onerror = () => {
-      console.error("WebSocket error. Attempting to reconnect...");
+      if (retry % 10 === 0) {
+        console.error("WebSocket error. Attempting to reconnect...");
+      }
       setIsConnected(false);
     };
 
     wsRef.current.onclose = () => {
-      console.warn("WebSocket closed. Reconnecting in 3 seconds...");
+      const base = 1000; // 1s
+      const maxDelay = 30000; // 30s
+      const delay = Math.min(maxDelay, Math.round(base * Math.pow(2, Math.min(retry, 6)) + Math.random() * 500));
+      if (retry % 3 === 0) {
+        console.warn(`WebSocket closed. Reconnecting in ${Math.round(delay/1000)}s...`);
+      }
       setIsConnected(false);
-      setTimeout(connectWebSocket, 3000);
+      setTimeout(() => connectWebSocket(retry + 1), delay);
     };
   };
 
@@ -277,8 +326,19 @@ export default function LiveMode() {
 
   return (
     <div className="live-container">
-      <h1>Road Hazard Detection</h1>
-      
+      <div className="live-header">
+        <h1>Road Hazard Detection</h1>
+        <div className="status-badges">
+          <span className={`badge ${isConnected ? 'ok' : 'warn'}`}>{isConnected ? 'Connected' : 'Disconnected'}</span>
+          <span className="badge neutral">Mode: {detectionMode === 'live' ? 'Live Camera' : 'Video File'}</span>
+          {detectionMode === 'video' && (
+            <span className="badge neutral">Progress: {videoProgress ? `${videoProgress.toFixed(1)}%` : '—'}</span>
+          )}
+          <span className="badge neutral">FPS: {fps}</span>
+          <span className={`badge ${driverLaneHazardCount > 0 ? 'danger' : 'ok'}`}>Lane Hazards: {driverLaneHazardCount}</span>
+        </div>
+      </div>
+
       {/* Mode Toggle */}
       <div className="mode-controls">
         <div className="mode-toggle">
@@ -330,8 +390,16 @@ export default function LiveMode() {
       </div>
 
       <div className="content-grid">
-        <div className="feed-column">
+        <div className="feed-column glass-card">
+          <div className="card-header">
+            <span>Processed Stream</span>
+          </div>
           <div className="video-container">
+            {!isConnected && (
+              <div className="skeleton">
+                <div className="shimmer" />
+              </div>
+            )}
             <video 
               ref={videoRef} 
               autoPlay 
@@ -339,10 +407,17 @@ export default function LiveMode() {
               muted 
               className="live-feed"
             />
+            <div className="overlay-metrics">
+              <span className={`dot ${isConnected ? 'ok' : 'warn'}`} />
+              <span>{fps} fps</span>
+            </div>
           </div>
         </div>
 
-        <div className="map-column">
+        <div className="map-column glass-card">
+          <div className="card-header">
+            <span>Hazard Map</span>
+          </div>
           <iframe
             src="/Map.html"
             title="Road Hazard Map"
@@ -350,6 +425,11 @@ export default function LiveMode() {
             allowFullScreen
           />
         </div>
+      </div>
+
+      <div className="legend">
+        <div className="legend-item"><span className="color road" /> Road hazards</div>
+        <div className="legend-item"><span className="color std" /> Standard objects</div>
       </div>
 
       <HazardNotifier 

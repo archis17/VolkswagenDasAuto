@@ -13,10 +13,17 @@ import asyncio
 # Load environment variables
 load_dotenv()
 
-# MongoDB connection
-mongo_client = MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-db = mongo_client["road_hazards"]
-hazard_reports = db["hazard_reports"]
+# MongoDB connection (fail fast if DB unreachable)
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=1000, connectTimeoutMS=1000)
+try:
+    # Trigger server selection once at startup (non-fatal)
+    mongo_client.admin.command("ping")
+    db = mongo_client["road_hazards"]
+    hazard_reports = db["hazard_reports"]
+except Exception:
+    db = None
+    hazard_reports = None
 
 # Email configuration
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
@@ -42,10 +49,13 @@ async def send_hazard_notification(notification: HazardNotification = Body(...))
             return {"success": False, "message": "Only pothole hazards are reported to authorities"}
             
         # Check for an existing report (approx. 100m radius)
-        existing_report = hazard_reports.find_one({
+        if hazard_reports is not None:
+            existing_report = hazard_reports.find_one({
             "location.lat": {"$gte": notification.location["lat"] - 0.001, "$lte": notification.location["lat"] + 0.001},
             "location.lng": {"$gte": notification.location["lng"] - 0.001, "$lte": notification.location["lng"] + 0.001},
-        })
+            })
+        else:
+            existing_report = None
         
         if existing_report:
             report_time = existing_report.get("timestamp", datetime.min)
@@ -59,13 +69,16 @@ async def send_hazard_notification(notification: HazardNotification = Body(...))
         map_link = f"https://www.google.com/maps/search/?api=1&query={notification.location['lat']},{notification.location['lng']}"
         
         # Store in MongoDB without image_url field
-        report_id = hazard_reports.insert_one({
+        if hazard_reports is not None:
+            report_id = hazard_reports.insert_one({
             "location": notification.location,
             "timestamp": notification.timestamp,
             "type": notification.type,
             "map_link": map_link,
             "status": "reported"
-        }).inserted_id
+            }).inserted_id
+        else:
+            report_id = "local-dev"
         
         # Send email notification with the map link
         await send_email_to_authority(notification, str(report_id), map_link)
@@ -139,6 +152,12 @@ def _send_smtp_email(host, port, user, password, sender, recipient, message):
 async def get_hazard_reports():
     """Get all hazard reports from the database"""
     try:
+        if hazard_reports is None:
+            return []
+
+        # Quick ping to avoid long hangs if DB went away
+        mongo_client.admin.command("ping")
+
         # Fetch all reports, sort by timestamp descending (newest first)
         reports = list(hazard_reports.find({}, {'_id': 0}).sort('timestamp', -1))
         
@@ -153,7 +172,8 @@ async def get_hazard_reports():
         
         return reports
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch hazard reports: {str(e)}")
+        # Fail fast with empty array rather than hanging the UI
+        return []
 
 @router.delete("/cleanup-resolved-hazards")
 async def cleanup_resolved_hazards():

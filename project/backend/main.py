@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pathlib import Path
 import uvicorn
 import os
@@ -16,7 +16,14 @@ from model_loader import road_model, standard_model  # Updated import
 from notification_service import router as notification_router
 import mode_state
 
-app = FastAPI()
+app = FastAPI(
+    title="Volkswagen Das Auto API",
+    description="Endpoints for live/video processing, notifications, and WebSocket streaming.",
+    version="1.0.0",
+    docs_url="/docs",          # Swagger UI
+    redoc_url="/redoc",        # ReDoc UI
+    openapi_url="/openapi.json"
+)
 
 # Add CORS middleware
 app.add_middleware(
@@ -29,6 +36,16 @@ app.add_middleware(
 
 # API Routes
 app.include_router(notification_router, prefix="/api")
+# Root redirect to Swagger for convenience
+@app.get("/", include_in_schema=False)
+async def root():
+    return RedirectResponse(url="/docs")
+
+# Simple health endpoint (useful for checks and Swagger quick test)
+@app.get("/health", tags=["meta"])
+async def health():
+    return {"status": "ok"}
+
 
 # Video upload and mode management endpoints
 @app.post("/api/upload-video")

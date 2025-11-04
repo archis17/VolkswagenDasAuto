@@ -11,6 +11,7 @@ class CameraManager:
         self.thread = None
         self.cap = None
         self.camera_available = False
+        self.target_fps = 15  # capture pacing to reduce CPU and latency
         
     def _find_available_camera(self):
         """Try to find an available camera"""
@@ -77,10 +78,21 @@ class CameraManager:
                         time.sleep(reconnect_delay)
                         continue
                     
+                    # Reduce internal buffering and set capture properties where supported
+                    try:
+                        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception:
+                        pass
                     self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
                     self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                    try:
+                        self.cap.set(cv2.CAP_PROP_FPS, self.target_fps)
+                    except Exception:
+                        pass
                     reconnect_attempts = 0
                 
+                # Pace capture to target FPS
+                start_ts = time.time()
                 ret, frame = self.cap.read()
                 if not ret:
                     reconnect_attempts += 1
@@ -102,6 +114,11 @@ class CameraManager:
                         pass
                 self.frame_queue.put(frame)
                 
+                # Sleep remaining time to maintain target FPS
+                elapsed = time.time() - start_ts
+                min_interval = 1.0 / float(self.target_fps)
+                if elapsed < min_interval:
+                    time.sleep(min_interval - elapsed)
             except Exception as e:
                 print(f"Camera error: {e}")
                 time.sleep(reconnect_delay)
