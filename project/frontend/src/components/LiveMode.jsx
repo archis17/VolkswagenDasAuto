@@ -8,6 +8,8 @@ import { Link } from 'react-router-dom';
 import HazardNotifier from './HazardNotifier';
 import NearbyHazardNotifier from './NearbyHazardNotifier';
 import EmergencyBrakeNotifier from './EmergencyBrakeNotifier';
+import voiceAlertService, { PRIORITY } from '../services/voiceAlertService';
+import { getRoadHazardMessage, getHazardMessage } from '../config/voiceMessages';
 
 export default function LiveMode() {
   const videoRef = useRef(null);
@@ -15,8 +17,8 @@ export default function LiveMode() {
   const wsRef = useRef(null);
   const alertRef = useRef(null);
   const cooldownRef = useRef(null);
-  const alertSoundRef = useRef(null);
   const fileInputRef = useRef(null);
+  const lastVoiceAlertRef = useRef(null);
   const [isConnected, setIsConnected] = useState(false);
   const [hazardDetected, setHazardDetected] = useState(false);
   const [currentLocation, setCurrentLocation] = useState(null);
@@ -29,16 +31,10 @@ export default function LiveMode() {
   const [error, setError] = useState(null);
   const frameCounterRef = useRef({ count: 0, lastTs: performance.now() });
 
-  // Initialize alert sound
+  // Cleanup voice alerts on unmount
   useEffect(() => {
-    alertSoundRef.current = new Audio('/alert.mp3');
-    alertSoundRef.current.loop = true;
-    
     return () => {
-      if (alertSoundRef.current) {
-        alertSoundRef.current.pause();
-        alertSoundRef.current = null;
-      }
+      voiceAlertService.stop();
     };
   }, []);
 
@@ -205,23 +201,29 @@ export default function LiveMode() {
     
           if (driverLaneHazardCount > 0) {
             if (!alertRef.current) {
+              // Get hazard type from parsed data or use default
+              const hazardType = parsedData.hazard_type || 'road hazard';
+              const hazardDistance = hazardDistances.length > 0 ? hazardDistances[0]?.distance : null;
+              
+              // Get appropriate voice message
+              const voiceMessage = getHazardMessage(
+                hazardType,
+                hazardDistance ? Math.round(hazardDistance) : null,
+                true // inDriverLane
+              );
+              
+              // Trigger voice alert
+              if (voiceMessage && (!lastVoiceAlertRef.current || Date.now() - lastVoiceAlertRef.current > 10000)) {
+                voiceAlertService.hazard(voiceMessage);
+                lastVoiceAlertRef.current = Date.now();
+              }
+              
               alertRef.current = toast.warning(`⚠️ Road Hazard Detected in Your Lane! \n
                 Reducing Speed ......
                 `, {
                 autoClose: false,
                 closeOnClick: false,
-                draggable: false,
-                onOpen: () => {
-                  if (alertSoundRef.current) {
-                    alertSoundRef.current.play().catch(err => console.error("Error playing sound:", err));
-                  }
-                },
-                onClose: () => {
-                  if (alertSoundRef.current) {
-                    alertSoundRef.current.pause();
-                    alertSoundRef.current.currentTime = 0;
-                  }
-                }
+                draggable: false
               });
             }
             if (cooldownRef.current) {
@@ -234,10 +236,6 @@ export default function LiveMode() {
                 if (alertRef.current) {
                   toast.dismiss(alertRef.current);
                   alertRef.current = null;
-                  if (alertSoundRef.current) {
-                    alertSoundRef.current.pause();
-                    alertSoundRef.current.currentTime = 0;
-                  }
                 }
                 cooldownRef.current = null;
               }, 3000);

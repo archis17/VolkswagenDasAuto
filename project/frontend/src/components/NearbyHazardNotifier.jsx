@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
+import voiceAlertService from '../services/voiceAlertService';
+import { getWarningMessage } from '../config/voiceMessages';
 
 export default function NearbyHazardNotifier({ currentLocation }) {
   const [nearbyPotholes, setNearbyPotholes] = useState([]);
   const nearbyPotholeAlertRef = useRef(null);
   const potholeCheckIntervalRef = useRef(null);
+  const lastWarningAlertRef = useRef(null);
 
   useEffect(() => {
     if (!currentLocation) return;
@@ -32,8 +35,17 @@ export default function NearbyHazardNotifier({ currentLocation }) {
         setNearbyPotholes(nearby);
         
         if (nearby.length > 0 && !nearbyPotholeAlertRef.current) {
+          // Get warning voice message
+          const warningMessage = getWarningMessage('pothole', nearby.length, '100');
+          
+          // Trigger warning voice alert (lower priority than emergency/hazard)
+          if (warningMessage && (!lastWarningAlertRef.current || Date.now() - lastWarningAlertRef.current > 30000)) {
+            voiceAlertService.warning(warningMessage);
+            lastWarningAlertRef.current = Date.now();
+          }
+          
           nearbyPotholeAlertRef.current = toast.warning(
-            `⚠️ Drive carefully! potholes were detected nearby.`, 
+            `⚠️ Drive carefully! ${nearby.length} pothole${nearby.length > 1 ? 's' : ''} ${nearby.length > 1 ? 'were' : 'was'} detected nearby.`, 
             {
               autoClose: 7000,
               closeOnClick: true,
