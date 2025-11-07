@@ -1,0 +1,185 @@
+# ============================================
+# Python / Backend
+# ============================================
+
+# Virtual environments
+project/backend/venv/
+project/backend/env/
+project/backend/ENV/
+project/backend/.venv/
+
+# Python cache
+project/backend/__pycache__/
+project/backend/**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment variables
+project/backend/.env
+project/backend/.env.local
+project/backend/.env.*.local
+
+# Uploads directory
+project/backend/uploads/
+project/backend/**/uploads/
+
+# Model files (large ML models - uncomment if you want to ignore them)
+# project/backend/*.pt
+# project/backend/*.pth
+# project/backend/*.onnx
+# project/backend/*.h5
+
+# Python logs
+project/backend/*.log
+project/backend/logs/
+
+# Database files
+project/backend/*.db
+project/backend/*.sqlite
+project/backend/*.sqlite3
+
+# Jupyter Notebooks
+project/backend/.ipynb_checkpoints
+
+# PyCharm
+project/backend/.idea/
+
+# ============================================
+# Node.js / Frontend
+# ============================================
+
+# Dependencies
+project/frontend/node_modules/
+project/frontend/.pnp
+project/frontend/.pnp.js
+
+# Build outputs
+project/frontend/dist/
+project/frontend/dev-dist/
+project/frontend/build/
+project/frontend/.next/
+project/frontend/out/
+
+# Environment variables
+project/frontend/.env
+project/frontend/.env.local
+project/frontend/.env.development.local
+project/frontend/.env.test.local
+project/frontend/.env.production.local
+
+# Logs
+project/frontend/npm-debug.log*
+project/frontend/yarn-debug.log*
+project/frontend/yarn-error.log*
+project/frontend/lerna-debug.log*
+project/frontend/*.log
+
+# Testing
+project/frontend/coverage/
+project/frontend/.nyc_output/
+
+# Vite
+project/frontend/.vite/
+
+# ============================================
+# Media Files (Large files)
+# ============================================
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.flv
+*.wmv
+*.m4v
+
+# Audio files (if large)
+# *.mp3
+# *.wav
+# *.flac
+# *.aac
+
+# Large image files
+# *.psd
+# *.ai
+
+# ============================================
+# IDE / Editor
+# ============================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# IntelliJ IDEA / PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================
+# OS Files
+# ============================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*
+
+# ============================================
+# Temporary / Cache Files
+# ============================================
+
+# General
+*.tmp
+*.temp
+*.bak
+*.backup
+*.cache
+.cache/
+
+# ============================================
+# Project Specific
+# ============================================
+
+# Temporary files
+project/filecontent.py
+project/**/merged_output.txt
+
+# Keep important files
+!project/backend/requirements.txt
+!project/frontend/package.json
+!project/frontend/package-lock.json
+!README.md
+!project/README.md
+!project/frontend/README.md
+

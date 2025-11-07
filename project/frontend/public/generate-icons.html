@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PWA Icon Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #1a1a2e;
+            color: white;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        canvas {
+            border: 2px solid #3498db;
+            margin: 10px;
+            background: white;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PWA Icon Generator</h1>
+        <p>Click the buttons below to generate and download PWA icons:</p>
+        
+        <canvas id="icon192" width="192" height="192"></canvas>
+        <canvas id="icon512" width="512" height="512"></canvas>
+        
+        <div>
+            <button onclick="generateIcons()">Generate Icons</button>
+            <button onclick="downloadIcon(192)">Download 192x192</button>
+            <button onclick="downloadIcon(512)">Download 512x512</button>
+        </div>
+    </div>
+
+    <script>
+        function generateIcons() {
+            const sizes = [192, 512];
+            sizes.forEach(size => {
+                const canvas = document.getElementById(`icon${size}`);
+                const ctx = canvas.getContext('2d');
+                
+                // Background gradient
+                const gradient = ctx.createLinearGradient(0, 0, size, size);
+                gradient.addColorStop(0, '#3498db');
+                gradient.addColorStop(1, '#2ecc71');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, size, size);
+                
+                // Draw eye icon (simplified)
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                // Outer circle
+                ctx.arc(size/2, size/2, size * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Inner circle (pupil)
+                ctx.fillStyle = '#1a1a2e';
+                ctx.beginPath();
+                ctx.arc(size/2, size/2, size * 0.15, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Highlight
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.beginPath();
+                ctx.arc(size/2 - size * 0.05, size/2 - size * 0.05, size * 0.05, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+        
+        function downloadIcon(size) {
+            const canvas = document.getElementById(`icon${size}`);
+            const link = document.createElement('a');
+            link.download = `icon-${size}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+        
+        // Generate on load
+        window.onload = generateIcons;
+    </script>
+</body>
+</html>
+
