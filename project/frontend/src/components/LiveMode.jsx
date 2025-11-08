@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import axios from 'axios';
+import apiClient from '../utils/axios';
+import { getWebSocketEndpoint } from '../config/api';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Camera, Video, Upload, StopCircle, MapPin, Wifi, WifiOff, Activity, AlertTriangle, Zap, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -137,15 +138,8 @@ export default function LiveMode() {
       try { wsRef.current.close(); } catch {}
     }
 
-    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    let wsURL;
-    
-    if (isDev) {
-      wsURL = window.location.origin.replace(/^http/, 'ws') + '/ws';
-    } else {
-      wsURL = 'ws://127.0.0.1:8000/ws';
-    }
-    
+    // Use configured WebSocket URL
+    const wsURL = getWebSocketEndpoint();
     wsRef.current = new WebSocket(wsURL);
     try { wsRef.current.binaryType = 'arraybuffer'; } catch {}
 
@@ -354,7 +348,7 @@ export default function LiveMode() {
   useEffect(() => {
     const fetchMode = async () => {
       try {
-        const response = await axios.get('/api/get-mode');
+        const response = await apiClient.get('/api/get-mode');
         setDetectionMode(response.data.mode);
       } catch (error) {
         console.error('Error fetching mode:', error);
@@ -407,7 +401,7 @@ export default function LiveMode() {
 
   const handleModeSwitch = async (mode) => {
     try {
-      const response = await axios.post('/api/set-mode', { mode });
+      const response = await apiClient.post('/api/set-mode', { mode });
       if (response.data.success) {
         setDetectionMode(mode);
         toast.info(`Switched to ${mode === 'live' ? 'Live Camera' : 'Video File'} mode`);
@@ -434,7 +428,7 @@ export default function LiveMode() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await axios.post('/api/upload-video', formData, {
+      const response = await apiClient.post('/api/upload-video', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -465,7 +459,7 @@ export default function LiveMode() {
 
   const handleStopVideo = async () => {
     try {
-      const response = await axios.post('/api/stop-video');
+      const response = await apiClient.post('/api/stop-video');
       if (response.data.success) {
         setDetectionMode('live');
         setVideoProgress(0);

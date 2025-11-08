@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import axios from 'axios';
+import apiClient from '../utils/axios';
 import { motion } from 'framer-motion';
 import { ArrowLeft, MapPin, RotateCw, AlertTriangle, Navigation, X, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -31,7 +31,7 @@ export default function PotholeMap() {
     const fetchPotholes = async () => {
       try {
         setLoading(true);
-        const response = await axios.get('/api/hazard-reports');
+        const response = await apiClient.get('/api/hazard-reports');
         setPotholes(response.data);
         setLoading(false);
       } catch (err) {

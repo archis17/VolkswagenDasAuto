@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, TrendingUp, BarChart3, PieChart, MapPin, Activity, AlertTriangle, Loader2 } from 'lucide-react';
-import axios from 'axios';
+import apiClient from '../utils/axios';
 import {
   LineChart,
   Line,
@@ -41,10 +41,10 @@ export default function AnalyticsDashboard() {
       setError(null);
 
       const [trendsRes, distributionRes, statsRes, heatmapRes] = await Promise.all([
-        axios.get(`/api/analytics/trends?days=${timeRange}&interval=${interval}`),
-        axios.get(`/api/analytics/distribution?days=${timeRange}`),
-        axios.get('/api/analytics/stats'),
-        axios.get(`/api/analytics/heatmap?days=${timeRange}&limit=500`)
+        apiClient.get(`/api/analytics/trends?days=${timeRange}&interval=${interval}`),
+        apiClient.get(`/api/analytics/distribution?days=${timeRange}`),
+        apiClient.get('/api/analytics/stats'),
+        apiClient.get(`/api/analytics/heatmap?days=${timeRange}&limit=500`)
       ]);
 
       setTrends(trendsRes.data);

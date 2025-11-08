@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import voiceAlertService from '../services/voiceAlertService';
 import { getWarningMessage } from '../config/voiceMessages';
+import { API_BASE_URL } from '../config/api';
 
 export default function NearbyHazardNotifier({ currentLocation }) {
   const [nearbyPotholes, setNearbyPotholes] = useState([]);
@@ -16,7 +17,7 @@ export default function NearbyHazardNotifier({ currentLocation }) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000);
-        const response = await fetch('/api/hazard-reports', { signal: controller.signal, cache: 'no-store' });
+        const response = await fetch(`${API_BASE_URL}/api/hazard-reports`, { signal: controller.signal, cache: 'no-store' });
         clearTimeout(timeoutId);
         if (!response.ok) throw new Error('Failed to fetch pothole data');
         

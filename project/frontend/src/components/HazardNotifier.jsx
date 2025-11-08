@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import axios from 'axios';
+import apiClient from '../utils/axios';
 
 export default function HazardNotifier({ 
   isConnected, 
@@ -61,7 +61,7 @@ export default function HazardNotifier({
   
   const sendHazardNotification = async (hazard) => {
     try {
-      const response = await axios.post('/api/hazard-notification', hazard);
+      const response = await apiClient.post('/api/hazard-notification', hazard);
       
       if (response.data.success) {
         lastNotificationRef.current = new Date();
