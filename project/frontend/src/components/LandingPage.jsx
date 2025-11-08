@@ -156,6 +156,14 @@ function Navigation() {
           >
             Technology
           </motion.a>
+          <Link to="/analytics">
+            <motion.a 
+              className={`${scrolled ? 'text-gray-700' : 'text-white'} hover:text-[#3498db] transition-colors`}
+              whileHover={{ y: -2 }}
+            >
+              Analytics
+            </motion.a>
+          </Link>
           <Link to="/live">
             <motion.button
               whileHover={{ scale: 1.05, boxShadow: "0 10px 30px rgba(52, 152, 219, 0.4)" }}

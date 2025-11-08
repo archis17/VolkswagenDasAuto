@@ -441,6 +441,148 @@ class NeonDB:
             logger.error(f"Error getting database stats: {e}")
         
         return stats
+    
+    async def get_analytics_trends(self, days: int = 30, interval: str = 'day') -> List[Dict[str, Any]]:
+        """
+        Get hazard detection trends over time
+        
+        Args:
+            days: Number of days to look back
+            interval: Time interval ('day', 'week', 'hour')
+            
+        Returns:
+            List of trend data points
+        """
+        if interval == 'day':
+            date_trunc = "DATE_TRUNC('day', timestamp)"
+        elif interval == 'week':
+            date_trunc = "DATE_TRUNC('week', timestamp)"
+        elif interval == 'hour':
+            date_trunc = "DATE_TRUNC('hour', timestamp)"
+        else:
+            date_trunc = "DATE_TRUNC('day', timestamp)"
+        
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        query = f"""
+            SELECT 
+                {date_trunc} as time_period,
+                COUNT(*) as count,
+                COUNT(DISTINCT hazard_type) as unique_types
+            FROM hazard_detections
+            WHERE timestamp >= $1
+            GROUP BY time_period
+            ORDER BY time_period ASC
+        """
+        
+        return await self.execute_query(query, cutoff_date)
+    
+    async def get_analytics_distribution(self, days: int = 30) -> List[Dict[str, Any]]:
+        """
+        Get hazard type distribution
+        
+        Args:
+            days: Number of days to look back
+            
+        Returns:
+            List of hazard type counts
+        """
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        query = """
+            SELECT 
+                hazard_type,
+                COUNT(*) as count,
+                AVG(detection_confidence) as avg_confidence,
+                COUNT(CASE WHEN driver_lane THEN 1 END) as driver_lane_count
+            FROM hazard_detections
+            WHERE timestamp >= $1
+            GROUP BY hazard_type
+            ORDER BY count DESC
+        """
+        
+        return await self.execute_query(query, cutoff_date)
+    
+    async def get_analytics_stats(self) -> Dict[str, Any]:
+        """
+        Get overall analytics statistics
+        
+        Returns:
+            Dictionary with various statistics
+        """
+        stats = {}
+        
+        # Total detections
+        total_query = "SELECT COUNT(*) as count FROM hazard_detections"
+        result = await self.execute_fetchone(total_query)
+        stats['total_detections'] = result.get('count', 0) if result else 0
+        
+        # Total reports
+        reports_query = "SELECT COUNT(*) as count FROM hazard_reports"
+        result = await self.execute_fetchone(reports_query)
+        stats['total_reports'] = result.get('count', 0) if result else 0
+        
+        # Detections in last 24 hours
+        day_ago = datetime.now() - timedelta(days=1)
+        day_query = "SELECT COUNT(*) as count FROM hazard_detections WHERE timestamp >= $1"
+        result = await self.execute_fetchone(day_query, day_ago)
+        stats['detections_last_24h'] = result.get('count', 0) if result else 0
+        
+        # Average confidence
+        conf_query = "SELECT AVG(detection_confidence) as avg_conf FROM hazard_detections WHERE detection_confidence IS NOT NULL"
+        result = await self.execute_fetchone(conf_query)
+        stats['avg_confidence'] = float(result.get('avg_conf', 0)) if result and result.get('avg_conf') else 0
+        
+        # Driver lane hazards
+        lane_query = "SELECT COUNT(*) as count FROM hazard_detections WHERE driver_lane = TRUE"
+        result = await self.execute_fetchone(lane_query)
+        stats['driver_lane_hazards'] = result.get('count', 0) if result else 0
+        
+        # Most common hazard type
+        common_query = """
+            SELECT hazard_type, COUNT(*) as count 
+            FROM hazard_detections 
+            GROUP BY hazard_type 
+            ORDER BY count DESC 
+            LIMIT 1
+        """
+        result = await self.execute_fetchone(common_query)
+        if result:
+            stats['most_common_type'] = result.get('hazard_type')
+            stats['most_common_count'] = result.get('count', 0)
+        else:
+            stats['most_common_type'] = None
+            stats['most_common_count'] = 0
+        
+        return stats
+    
+    async def get_analytics_heatmap(self, days: int = 30, limit: int = 1000) -> List[Dict[str, Any]]:
+        """
+        Get geographic heatmap data
+        
+        Args:
+            days: Number of days to look back
+            limit: Maximum number of points to return
+            
+        Returns:
+            List of location points with counts
+        """
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        query = """
+            SELECT 
+                ST_Y(location::geometry) as lat,
+                ST_X(location::geometry) as lng,
+                COUNT(*) as count,
+                hazard_type
+            FROM hazard_detections
+            WHERE timestamp >= $1 AND location IS NOT NULL
+            GROUP BY lat, lng, hazard_type
+            ORDER BY count DESC
+            LIMIT $2
+        """
+        
+        return await self.execute_query(query, cutoff_date, limit)
 
 
 # Global Neon DB instance

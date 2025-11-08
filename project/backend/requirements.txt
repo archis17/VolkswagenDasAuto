@@ -31,3 +31,6 @@ hiredis>=2.2.0
 Pillow>=10.0.0
 exifread>=3.0.0
 
+# MQTT for IoT integration
+aiomqtt>=2.0.0
+

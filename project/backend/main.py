@@ -17,6 +17,7 @@ from model_loader import road_model, standard_model  # Updated import
 from notification_service import router as notification_router
 from redis_client import redis_client
 from neon_db import neon_db
+from mqtt_client import mqtt_client
 import mode_state
 import asyncio
 
@@ -42,6 +43,16 @@ async def lifespan(app: FastAPI):
     else:
         print("✅ Redis connected on startup")
     
+    # Initialize MQTT connection (if enabled)
+    try:
+        await mqtt_client.connect()
+        if mqtt_client.is_connected():
+            print("✅ MQTT connected on startup")
+        else:
+            print("⚠️  Warning: MQTT is disabled or connection failed. Set MQTT_ENABLED=true to enable.")
+    except Exception as e:
+        print(f"⚠️  Warning: MQTT connection error: {e}")
+    
     yield
     
     # Shutdown
@@ -53,6 +64,13 @@ async def lifespan(app: FastAPI):
         print("✅ Neon DB disconnected on shutdown")
     except Exception as e:
         print(f"⚠️  Warning: Error disconnecting from Neon DB: {e}")
+    
+    # Close MQTT connection
+    try:
+        await mqtt_client.disconnect()
+        print("✅ MQTT disconnected on shutdown")
+    except Exception as e:
+        print(f"⚠️  Warning: Error disconnecting from MQTT: {e}")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -204,6 +222,72 @@ async def get_database_status():
     """Get Neon DB connection status and statistics"""
     stats = await neon_db.get_stats()
     return JSONResponse(stats)
+
+# Analytics endpoints
+@app.get("/api/analytics/trends")
+async def get_analytics_trends(days: int = 30, interval: str = 'day'):
+    """
+    Get hazard detection trends over time
+    
+    Args:
+        days: Number of days to look back (default: 30)
+        interval: Time interval - 'day', 'week', or 'hour' (default: 'day')
+    """
+    try:
+        if interval not in ['day', 'week', 'hour']:
+            interval = 'day'
+        trends = await neon_db.get_analytics_trends(days=days, interval=interval)
+        return JSONResponse(trends)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching trends: {str(e)}")
+
+@app.get("/api/analytics/distribution")
+async def get_analytics_distribution(days: int = 30):
+    """
+    Get hazard type distribution
+    
+    Args:
+        days: Number of days to look back (default: 30)
+    """
+    try:
+        distribution = await neon_db.get_analytics_distribution(days=days)
+        return JSONResponse(distribution)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching distribution: {str(e)}")
+
+@app.get("/api/analytics/stats")
+async def get_analytics_stats():
+    """Get overall analytics statistics"""
+    try:
+        stats = await neon_db.get_analytics_stats()
+        return JSONResponse(stats)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching stats: {str(e)}")
+
+@app.get("/api/analytics/heatmap")
+async def get_analytics_heatmap(days: int = 30, limit: int = 1000):
+    """
+    Get geographic heatmap data
+    
+    Args:
+        days: Number of days to look back (default: 30)
+        limit: Maximum number of points to return (default: 1000)
+    """
+    try:
+        heatmap = await neon_db.get_analytics_heatmap(days=days, limit=limit)
+        return JSONResponse(heatmap)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching heatmap: {str(e)}")
+
+# MQTT endpoints
+@app.get("/api/mqtt/status")
+async def get_mqtt_status():
+    """Get MQTT connection status and statistics"""
+    try:
+        stats = await mqtt_client.get_stats()
+        return JSONResponse(stats)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching MQTT status: {str(e)}")
 
 # WebSocket Route
 app.websocket("/ws")(websocket_endpoint)

@@ -3,6 +3,7 @@ import cv2
 import torch
 import numpy as np
 import time
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Dict
@@ -13,6 +14,8 @@ from model_loader import road_model, standard_model, MODEL_CONFIG
 from config import DETECTION_THRESHOLDS, NMS_CONFIG, INFERENCE_CONFIG  # Import optimized configs
 from distance_estimator import DistanceEstimator
 from neon_db import neon_db
+from mqtt_client import mqtt_client
+from geofence_service import geofence_service
 
 # Optional faster JPEG encoder
 try:
@@ -74,6 +77,42 @@ async def websocket_endpoint(websocket: WebSocket):
     cached_hazard_distances = []
     cached_mode = "live"
     cached_vis_frame = None  # Cache the last processed frame
+    
+    # GPS location tracking (updated from client messages)
+    current_gps_location: Optional[Dict[str, float]] = None
+    
+    # Task to receive messages from client (GPS updates)
+    async def receive_messages():
+        """Receive messages from client (GPS updates)"""
+        nonlocal current_gps_location
+        try:
+            while True:
+                try:
+                    # Wait for message with timeout
+                    message = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                    try:
+                        data = json.loads(message)
+                        if 'gps' in data:
+                            gps_data = data['gps']
+                            if isinstance(gps_data, dict) and 'lat' in gps_data and 'lng' in gps_data:
+                                current_gps_location = {
+                                    'lat': float(gps_data['lat']),
+                                    'lng': float(gps_data['lng'])
+                                }
+                    except (json.JSONDecodeError, KeyError, ValueError) as e:
+                        # Ignore invalid messages
+                        pass
+                except asyncio.TimeoutError:
+                    # Timeout is expected, continue loop
+                    continue
+                except Exception:
+                    # Connection closed or error
+                    break
+        except Exception:
+            pass
+    
+    # Start receiving messages task
+    receive_task = asyncio.create_task(receive_messages())
 
     try:
         while True:
@@ -111,6 +150,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     cached_hazard_distances = hazard_distances
                     cached_mode = current_mode
                     cached_vis_frame = vis_frame.copy() if vis_frame is not None else None
+                    
+                    # Store detections in database and publish to MQTT (non-blocking)
+                    if results:  # Only store if we have detections
+                        asyncio.create_task(store_and_publish_detections(
+                            results=results,
+                            driver_lane_hazard_count=driver_lane_hazard_count,
+                            hazard_distances=hazard_distances,
+                            gps_location=current_gps_location,
+                            frame_number=frame_index,
+                            current_mode=current_mode
+                        ))
                 else:
                     # Use cached results and frame for faster processing
                     vis_frame = cached_vis_frame if cached_vis_frame is not None else frame
@@ -178,13 +228,17 @@ async def websocket_endpoint(websocket: WebSocket):
             # If frame exists, continue immediately without sleep
 
     except WebSocketDisconnect:
-        print(f"Client disconnected (sent {frame_count} frames, skipped {skip_count} frames)")
+        print(f"Client disconnected")
     except Exception as e:
         print(f"WebSocket error: {str(e)}")
     finally:
         # Cancel receive task
         if 'receive_task' in locals():
             receive_task.cancel()
+            try:
+                await receive_task
+            except Exception:
+                pass
         # Cleanup
         try:
             await websocket.close()
@@ -251,6 +305,113 @@ async def store_hazard_detections(
         # Don't fail the entire process if database storage fails
         import traceback
         print(f"Error storing hazard detection: {e}")
+        print(traceback.format_exc())
+
+
+async def store_and_publish_detections(
+    results: list,
+    driver_lane_hazard_count: int,
+    hazard_distances: list,
+    gps_location: Optional[Dict[str, float]],
+    frame_number: int,
+    current_mode: str
+):
+    """
+    Store detections in database, publish to MQTT, and broadcast to geofences
+    """
+    if not neon_db._pool:
+        await neon_db.connect()
+    
+    try:
+        # Validate and correct GPS coordinates if needed
+        validated_gps = None
+        if gps_location:
+            lat = gps_location.get('lat', 0)
+            lng = gps_location.get('lng', 0)
+            
+            # Check if coordinates might be swapped
+            if abs(lat) > 90 or abs(lng) > 180:
+                if abs(lat) <= 180 and abs(lng) <= 90:
+                    validated_gps = {'lat': lng, 'lng': lat}
+                else:
+                    validated_gps = None
+            else:
+                validated_gps = gps_location
+        
+        detection_ids = []
+        
+        # Store each detection
+        for i, detection in enumerate(results):
+            hazard_type = detection.get('type', detection.get('class_name', 'unknown'))
+            confidence = detection.get('conf', 0.0)
+            bounding_box = detection.get('box', None)
+            
+            # Get distance if available
+            distance = None
+            is_driver_lane = False
+            if i < len(hazard_distances):
+                distance = hazard_distances[i].get('distance')
+                is_driver_lane = hazard_distances[i].get('inDriverLane', False)
+            
+            # Store detection in database
+            detection_id = await neon_db.insert_hazard_detection(
+                location=validated_gps,
+                hazard_type=hazard_type,
+                timestamp=datetime.now(),
+                detection_confidence=confidence,
+                bounding_box=bounding_box,
+                driver_lane=is_driver_lane,
+                distance_meters=distance,
+                frame_number=frame_number,
+                video_path=video_file_manager.video_path if current_mode == "video" else None,
+                source="websocket"
+            )
+            
+            if detection_id:
+                detection_ids.append({
+                    'id': detection_id,
+                    'detection': detection,
+                    'location': validated_gps,
+                    'confidence': confidence,
+                    'hazard_type': hazard_type,
+                    'distance': distance,
+                    'driver_lane': is_driver_lane
+                })
+        
+        # Publish to MQTT and broadcast to geofences for each stored detection
+        for det_data in detection_ids:
+            detection_id = det_data['id']
+            hazard_type = det_data['hazard_type']
+            location = det_data['location']
+            confidence = det_data['confidence']
+            
+            # Publish to MQTT
+            if mqtt_client.is_connected() or await mqtt_client.ensure_connected():
+                await mqtt_client.publish_detection(
+                    detection_id=detection_id,
+                    hazard_type=hazard_type,
+                    location=location,
+                    confidence=confidence,
+                    timestamp=datetime.now()
+                )
+            
+            # Broadcast to geofences if location is available
+            if location:
+                await geofence_service.broadcast_to_geofence(
+                    detection_id=detection_id,
+                    hazard_type=hazard_type,
+                    location=location,
+                    additional_data={
+                        "confidence": confidence,
+                        "driver_lane": det_data['driver_lane'],
+                        "distance_meters": det_data['distance']
+                    }
+                )
+                
+    except Exception as e:
+        # Don't fail the entire process if storage/publishing fails
+        import traceback
+        print(f"Error in store_and_publish_detections: {e}")
         print(traceback.format_exc())
 
 # Initialize the distance estimator

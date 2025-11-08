@@ -3,6 +3,19 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Suppress common WebSocket proxy errors that are expected during development
+const ignoredErrorCodes = ['ECONNREFUSED', 'ECONNABORTED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ENOTFOUND'];
+
+// Custom error handler for WebSocket proxy
+const handleProxyError = (err) => {
+  if (err && ignoredErrorCodes.includes(err.code)) {
+    // Silently ignore expected connection errors
+    return;
+  }
+  // Only log unexpected errors
+  console.error('WebSocket proxy error:', err);
+};
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -93,29 +106,50 @@ export default defineConfig({
         secure: false,
       },
       '/ws': {
-        target: 'http://127.0.0.1:8000',
+        target: 'ws://127.0.0.1:8000',
         ws: true,
         changeOrigin: true,
         secure: false,
+        timeout: 5000,
         configure: (proxy, _options) => {
+          // Suppress common WebSocket connection errors
           proxy.on('error', (err, _req, _res) => {
             // Silently handle WebSocket connection errors
             // These are expected when the backend is not running or connection is aborted
-            const ignoredCodes = ['ECONNREFUSED', 'ECONNABORTED', 'ECONNRESET', 'EPIPE'];
-            if (!ignoredCodes.includes(err.code)) {
-              console.error('WebSocket proxy error:', err);
-            }
+            handleProxyError(err);
           });
+          
           proxy.on('proxyReqWs', (proxyReq, req, socket) => {
             // Handle WebSocket upgrade and socket errors
             socket.on('error', (err) => {
               // Silently handle socket errors that are common during connection issues
-              const ignoredCodes = ['ECONNABORTED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'];
-              if (!ignoredCodes.includes(err.code)) {
-                console.error('WebSocket socket error:', err);
+              handleProxyError(err);
+            });
+            
+            // Prevent uncaught exceptions from socket write errors
+            const originalWrite = socket.write.bind(socket);
+            socket.write = function(...args) {
+              try {
+                return originalWrite(...args);
+              } catch (err) {
+                handleProxyError(err);
+                return false;
               }
+            };
+            
+            // Handle write errors on the socket
+            socket.on('close', () => {
+              // Silently handle socket close events
             });
           });
+          
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            // Handle response errors
+            proxyRes.on('error', (err) => {
+              handleProxyError(err);
+            });
+          });
+          
           proxy.on('close', () => {
             // Silently handle proxy close events
           });

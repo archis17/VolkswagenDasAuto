@@ -7,6 +7,7 @@ import PWAInstallPrompt from './components/PWAInstallPrompt';
 import LandingPage from './components/LandingPage';
 import LiveMode from './components/LiveMode';
 import PotholeMap from './components/PotholeMap';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
 
 // Page transition variants
 const pageVariants = {
@@ -55,6 +56,7 @@ function AnimatedRoutes() {
         <Route path="/" element={<PageWrapper><LandingPage /></PageWrapper>} />
         <Route path="/live" element={<PageWrapper><LiveMode /></PageWrapper>} />
         <Route path="/pothole-map" element={<PageWrapper><PotholeMap /></PageWrapper>} />
+        <Route path="/analytics" element={<PageWrapper><AnalyticsDashboard /></PageWrapper>} />
       </Routes>
     </AnimatePresence>
   );
