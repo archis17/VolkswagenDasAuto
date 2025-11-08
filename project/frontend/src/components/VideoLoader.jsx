@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkipForward, Loader2 } from 'lucide-react';
 
@@ -9,6 +9,7 @@ export default function VideoLoader({ onComplete }) {
   const [error, setError] = useState(false);
   const videoRef = useRef(null);
   const skipTimeoutRef = useRef(null);
+  const hasInitializedRef = useRef(false); // Prevent double initialization
 
   useEffect(() => {
     // Show skip button after 2 seconds
@@ -24,6 +25,10 @@ export default function VideoLoader({ onComplete }) {
   }, []);
 
   const handleVideoLoaded = () => {
+    // Prevent double initialization in React StrictMode
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+    
     setIsLoading(false);
     setIsPlaying(true);
     if (videoRef.current) {
@@ -39,16 +44,20 @@ export default function VideoLoader({ onComplete }) {
     handleSkip();
   };
 
-  const handleSkip = () => {
+  const handleSkip = useCallback(() => {
+    // Prevent multiple calls
+    if (!hasInitializedRef.current && !isPlaying && !isLoading) return;
+    
     if (videoRef.current) {
       videoRef.current.pause();
     }
     setIsPlaying(false);
+    setIsLoading(false);
     // Small delay before calling onComplete for smooth transition
     setTimeout(() => {
       onComplete();
     }, 300);
-  };
+  }, [isPlaying, isLoading, onComplete]);
 
   const handleVideoError = () => {
     setError(true);
@@ -67,7 +76,7 @@ export default function VideoLoader({ onComplete }) {
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [error]);
+  }, [error, handleSkip]);
 
   return (
     <AnimatePresence>

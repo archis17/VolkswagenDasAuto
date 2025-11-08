@@ -3,7 +3,7 @@ import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import axios from 'axios';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Camera, Video, Upload, StopCircle, MapPin } from 'lucide-react';
+import { ArrowLeft, Camera, Video, Upload, StopCircle, MapPin, Wifi, WifiOff, Activity, AlertTriangle, Zap, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import HazardNotifier from './HazardNotifier';
 import NearbyHazardNotifier from './NearbyHazardNotifier';
@@ -44,10 +44,8 @@ export default function LiveMode() {
     let locationWarningToastId = null;
 
     if (navigator.geolocation) {
-      // First try to get current position (one-time check)
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          // Successfully got location - clear any existing warnings
           if (locationWarningToastId) {
             toast.dismiss(locationWarningToastId);
             locationWarningToastId = null;
@@ -59,7 +57,6 @@ export default function LiveMode() {
           };
           setCurrentLocation(newLocation);
           
-          // Send GPS to WebSocket server if connected
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               gps: newLocation
@@ -67,14 +64,12 @@ export default function LiveMode() {
           }
         },
         (error) => {
-          // Only show warning for permission denied (error code 1)
           if (error.code === error.PERMISSION_DENIED) {
             locationWarningToastId = toast.warning("Location access is needed for hazard reporting. Please enable location permissions in your browser settings.", {
               autoClose: false,
               closeOnClick: true,
             });
           } else {
-            // Other errors (timeout, position unavailable) - just log, don't show warning
             console.warn("Location error:", error.message);
           }
         },
@@ -85,10 +80,8 @@ export default function LiveMode() {
         }
       );
 
-      // Then start watching position for updates
       watchId = navigator.geolocation.watchPosition(
         (position) => {
-          // Successfully got location - clear any existing warnings
           if (locationWarningToastId) {
             toast.dismiss(locationWarningToastId);
             locationWarningToastId = null;
@@ -100,7 +93,6 @@ export default function LiveMode() {
           };
           setCurrentLocation(newLocation);
           
-          // Send GPS to WebSocket server if connected
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               gps: newLocation
@@ -108,9 +100,7 @@ export default function LiveMode() {
           }
         },
         (error) => {
-          // Only show warning for permission denied (error code 1)
           if (error.code === error.PERMISSION_DENIED) {
-            // Only show warning if we don't already have one
             if (!locationWarningToastId) {
               locationWarningToastId = toast.warning("Location access is needed for hazard reporting. Please enable location permissions in your browser settings.", {
                 autoClose: false,
@@ -118,13 +108,12 @@ export default function LiveMode() {
               });
             }
           } else {
-            // Other errors (timeout, position unavailable) - just log, don't show warning
             console.warn("Location watch error:", error.message);
           }
         },
         {
           enableHighAccuracy: true,
-          maximumAge: 5000,  // Accept cached position up to 5 seconds old
+          maximumAge: 5000,
           timeout: 10000
         }
       );
@@ -132,7 +121,6 @@ export default function LiveMode() {
       toast.warning("Geolocation is not supported by this browser");
     }
 
-    // Cleanup: stop watching position when component unmounts
     return () => {
       if (watchId !== null) {
         navigator.geolocation.clearWatch(watchId);
@@ -149,26 +137,21 @@ export default function LiveMode() {
       try { wsRef.current.close(); } catch {}
     }
 
-    // Use proxy in development (Vite dev server), direct connection in production
     const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     let wsURL;
     
     if (isDev) {
-      // In dev, use the Vite proxy
       wsURL = window.location.origin.replace(/^http/, 'ws') + '/ws';
     } else {
-      // In production, connect directly to backend
       wsURL = 'ws://127.0.0.1:8000/ws';
     }
     
     wsRef.current = new WebSocket(wsURL);
-    // Prefer ArrayBuffer to cut Blob overhead
     try { wsRef.current.binaryType = 'arraybuffer'; } catch {}
 
     wsRef.current.onopen = () => {
       setIsConnected(true);
       
-      // Send GPS location to server when WebSocket opens
       if (currentLocation) {
         wsRef.current.send(JSON.stringify({
           gps: {
@@ -182,7 +165,6 @@ export default function LiveMode() {
     wsRef.current.onmessage = (e) => {
       if (typeof e.data === 'string') {
         try {
-          // Ignore keepalive pings
           if (e.data === 'ping') return;
           const parsedData = JSON.parse(e.data);
           const driverLaneHazardCount = parsedData.driver_lane_hazard_count;
@@ -191,7 +173,6 @@ export default function LiveMode() {
           setDriverLaneHazardCount(driverLaneHazardCount);
           setHazardDistances(hazardDistances);
           
-          // Update mode and video progress if present
           if (parsedData.mode) {
             setDetectionMode(parsedData.mode);
           }
@@ -201,18 +182,15 @@ export default function LiveMode() {
     
           if (driverLaneHazardCount > 0) {
             if (!alertRef.current) {
-              // Get hazard type from parsed data or use default
               const hazardType = parsedData.hazard_type || 'road hazard';
               const hazardDistance = hazardDistances.length > 0 ? hazardDistances[0]?.distance : null;
               
-              // Get appropriate voice message
               const voiceMessage = getHazardMessage(
                 hazardType,
                 hazardDistance ? Math.round(hazardDistance) : null,
-                true // inDriverLane
+                true
               );
               
-              // Trigger voice alert
               if (voiceMessage && (!lastVoiceAlertRef.current || Date.now() - lastVoiceAlertRef.current > 10000)) {
                 voiceAlertService.hazard(voiceMessage);
                 lastVoiceAlertRef.current = Date.now();
@@ -269,29 +247,24 @@ export default function LiveMode() {
 
           const ctx = canvas.getContext('2d');
           
-          // Hide video element when canvas is active
           if (videoRef.current) {
             videoRef.current.style.display = 'none';
           }
 
-          // Use createImageBitmap for faster decode and draw
           createImageBitmap(blob).then((bitmap) => {
             if (!canvas || !ctx) return;
             
-            // Calculate aspect ratio and sizing
             const containerWidth = container.clientWidth;
             const containerHeight = container.clientHeight;
             const imageAspect = bitmap.width / bitmap.height;
             const containerAspect = containerWidth / containerHeight;
 
             if (imageAspect > containerAspect) {
-              // Image is wider - fit to width
               canvas.width = containerWidth;
               canvas.height = containerWidth / imageAspect;
               canvas.style.top = `${(containerHeight - canvas.height) / 2}px`;
               canvas.style.left = '0';
             } else {
-              // Image is taller - fit to height
               canvas.height = containerHeight;
               canvas.width = containerHeight * imageAspect;
               canvas.style.left = `${(containerWidth - canvas.width) / 2}px`;
@@ -302,7 +275,6 @@ export default function LiveMode() {
             ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
             bitmap.close();
 
-            // FPS estimation
             const fc = frameCounterRef.current;
             fc.count += 1;
             const now = performance.now();
@@ -313,7 +285,6 @@ export default function LiveMode() {
             }
           }).catch((err) => {
             console.error('Error creating image bitmap:', err);
-            // Fallback path if createImageBitmap not supported
             const img = new Image();
             img.onload = () => {
               if (!canvas || !ctx) return;
@@ -369,8 +340,8 @@ export default function LiveMode() {
     };
 
     wsRef.current.onclose = () => {
-      const base = 1000; // 1s
-      const maxDelay = 30000; // 30s
+      const base = 1000;
+      const maxDelay = 30000;
       const delay = Math.min(maxDelay, Math.round(base * Math.pow(2, Math.min(retry, 6)) + Math.random() * 500));
       if (retry % 3 === 0) {
         console.warn(`WebSocket closed. Reconnecting in ${Math.round(delay/1000)}s...`);
@@ -380,7 +351,6 @@ export default function LiveMode() {
     };
   };
 
-  // Fetch current mode on mount
   useEffect(() => {
     const fetchMode = async () => {
       try {
@@ -405,13 +375,11 @@ export default function LiveMode() {
         }
       }
       
-      // Clean up canvas
       const canvas = document.getElementById('processed-canvas');
       if (canvas) {
         canvas.remove();
       }
       
-      // Clean up any image URLs
       const processedImg = document.getElementById('processed-feed');
       if (processedImg) {
         if (processedImg.src) {
@@ -422,7 +390,6 @@ export default function LiveMode() {
     };
   }, []);
 
-  // Clean up canvas when component unmounts or mode changes
   useEffect(() => {
     return () => {
       const canvas = document.getElementById('processed-canvas');
@@ -456,7 +423,6 @@ export default function LiveMode() {
       const file = event.target.files[0];
       if (!file) return;
 
-      // Validate file type
       const allowedTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/x-matroska'];
       if (!allowedTypes.includes(file.type) && !file.name.match(/\.(mp4|avi|mov|mkv|webm|flv|wmv)$/i)) {
         toast.error('Unsupported file format. Please upload MP4, AVI, MOV, MKV, WEBM, FLV, or WMV files.');
@@ -483,7 +449,6 @@ export default function LiveMode() {
       if (response.data.success) {
         setDetectionMode('video');
         toast.success(`Video uploaded successfully: ${response.data.filename}`);
-        // Reset file input
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
@@ -512,7 +477,6 @@ export default function LiveMode() {
     }
   };
 
-  // Prevent white screen on errors
   if (error && !isConnected && !uploading) {
     console.error('Component error state:', error);
   }
@@ -523,36 +487,49 @@ export default function LiveMode() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
-      className="min-h-screen bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460]"
+      className="min-h-screen bg-gradient-to-br from-[#0a0e27] via-[#1a1a2e] to-[#16213e] relative overflow-hidden"
     >
+      {/* Animated background grid */}
+      <div className="absolute inset-0 overflow-hidden opacity-10">
+        <div className="absolute inset-0" style={{
+          backgroundImage: 'linear-gradient(0deg, transparent 24%, rgba(52, 152, 219, .1) 25%, rgba(52, 152, 219, .1) 26%, transparent 27%, transparent 74%, rgba(52, 152, 219, .1) 75%, rgba(52, 152, 219, .1) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(52, 152, 219, .1) 25%, rgba(52, 152, 219, .1) 26%, transparent 27%, transparent 74%, rgba(52, 152, 219, .1) 75%, rgba(52, 152, 219, .1) 76%, transparent 77%, transparent)',
+          backgroundSize: '50px 50px'
+        }} />
+      </div>
+
       {/* Header */}
       <motion.div 
         initial={{ y: -50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.2 }}
-        className="bg-white/10 backdrop-blur-lg border-b border-white/20"
+        className="relative z-10 bg-white/5 backdrop-blur-xl border-b border-white/10 shadow-2xl"
       >
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
           <Link to="/">
             <motion.button
               whileHover={{ scale: 1.05, x: -5 }}
               whileTap={{ scale: 0.95 }}
-              className="flex items-center gap-2 text-white hover:text-[#3498db] transition-colors"
+              className="flex items-center gap-2 text-white/90 hover:text-white transition-colors group"
             >
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
               <span className="font-semibold">Back to Home</span>
             </motion.button>
           </Link>
           
-          <h1 className="text-2xl lg:text-3xl font-bold text-white">
+          <motion.h1 
+            className="text-2xl lg:text-3xl font-bold bg-gradient-to-r from-white via-[#3498db] to-white bg-clip-text text-transparent"
+            initial={{ scale: 0.9 }}
+            animate={{ scale: 1 }}
+            transition={{ delay: 0.3 }}
+          >
             Road Hazard Detection
-          </h1>
+          </motion.h1>
           
           <Link to="/pothole-map">
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="flex items-center gap-2 px-4 py-2 bg-[#3498db] text-white rounded-full font-semibold shadow-lg"
+              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-[#3498db] to-[#2980b9] text-white rounded-full font-semibold shadow-lg hover:shadow-xl transition-all"
             >
               <MapPin className="w-5 h-5" />
               <span className="hidden sm:inline">View Map</span>
@@ -561,68 +538,123 @@ export default function LiveMode() {
         </div>
       </motion.div>
 
-      <div className="max-w-7xl mx-auto p-6">
-        {/* Status Cards */}
+      <div className="relative z-10 max-w-7xl mx-auto p-6">
+        {/* Status Cards - Modern Design */}
         <motion.div 
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6"
+          className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4 mb-6"
         >
-          <div className={`bg-white/10 backdrop-blur-lg rounded-xl p-4 border ${isConnected ? 'border-[#2ecc71]' : 'border-[#e74c3c]'}`}>
-            <div className="text-xs text-gray-300 mb-1">Connection</div>
-            <div className={`text-lg font-bold flex items-center gap-2 ${isConnected ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
+          {/* Connection Status */}
+          <motion.div 
+            whileHover={{ scale: 1.02, y: -2 }}
+            className={`relative overflow-hidden rounded-2xl p-5 border backdrop-blur-xl ${
+              isConnected 
+                ? 'bg-gradient-to-br from-[#2ecc71]/20 to-[#27ae60]/10 border-[#2ecc71]/30' 
+                : 'bg-gradient-to-br from-[#e74c3c]/20 to-[#c0392b]/10 border-[#e74c3c]/30'
+            } shadow-xl`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              {isConnected ? (
+                <Wifi className="w-5 h-5 text-[#2ecc71]" />
+              ) : (
+                <WifiOff className="w-5 h-5 text-[#e74c3c]" />
+              )}
               <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-[#2ecc71]' : 'bg-[#e74c3c]'} animate-pulse`}></span>
+            </div>
+            <div className="text-xs text-gray-400 mb-1">Connection</div>
+            <div className={`text-xl font-bold ${isConnected ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
               {isConnected ? 'Online' : 'Offline'}
             </div>
-          </div>
+          </motion.div>
 
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
-            <div className="text-xs text-gray-300 mb-1">Mode</div>
-            <div className="text-lg font-bold text-white flex items-center gap-2">
-              {detectionMode === 'live' ? <Camera className="text-[#3498db] w-5 h-5" /> : <Video className="text-[#9b59b6] w-5 h-5" />}
+          {/* Mode Status */}
+          <motion.div 
+            whileHover={{ scale: 1.02, y: -2 }}
+            className="relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br from-white/10 to-white/5 border border-white/20 backdrop-blur-xl shadow-xl"
+          >
+            <div className="flex items-center justify-between mb-2">
+              {detectionMode === 'live' ? (
+                <Camera className="text-[#3498db] w-5 h-5" />
+              ) : (
+                <Video className="text-[#9b59b6] w-5 h-5" />
+              )}
+            </div>
+            <div className="text-xs text-gray-400 mb-1">Mode</div>
+            <div className="text-xl font-bold text-white">
               {detectionMode === 'live' ? 'Live' : 'Video'}
             </div>
-          </div>
+          </motion.div>
 
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
-            <div className="text-xs text-gray-300 mb-1">FPS</div>
-            <div className="text-lg font-bold text-white">{fps}</div>
-          </div>
+          {/* FPS */}
+          <motion.div 
+            whileHover={{ scale: 1.02, y: -2 }}
+            className="relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br from-white/10 to-white/5 border border-white/20 backdrop-blur-xl shadow-xl"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <Activity className="text-[#3498db] w-5 h-5" />
+            </div>
+            <div className="text-xs text-gray-400 mb-1">FPS</div>
+            <div className="text-xl font-bold text-white">{fps}</div>
+          </motion.div>
 
+          {/* Video Progress (conditional) */}
           {detectionMode === 'video' && (
-            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
-              <div className="text-xs text-gray-300 mb-1">Progress</div>
-              <div className="text-lg font-bold text-white">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              whileHover={{ scale: 1.02, y: -2 }}
+              className="relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br from-white/10 to-white/5 border border-white/20 backdrop-blur-xl shadow-xl"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <TrendingUp className="text-[#9b59b6] w-5 h-5" />
+              </div>
+              <div className="text-xs text-gray-400 mb-1">Progress</div>
+              <div className="text-xl font-bold text-white">
                 {videoProgress ? `${videoProgress.toFixed(1)}%` : '—'}
               </div>
-            </div>
+            </motion.div>
           )}
 
-          <div className={`bg-white/10 backdrop-blur-lg rounded-xl p-4 border ${driverLaneHazardCount > 0 ? 'border-[#e74c3c]' : 'border-[#2ecc71]'}`}>
-            <div className="text-xs text-gray-300 mb-1">Lane Hazards</div>
-            <div className={`text-lg font-bold ${driverLaneHazardCount > 0 ? 'text-[#e74c3c]' : 'text-[#2ecc71]'}`}>
+          {/* Lane Hazards */}
+          <motion.div 
+            whileHover={{ scale: 1.02, y: -2 }}
+            className={`relative overflow-hidden rounded-2xl p-5 border backdrop-blur-xl ${
+              driverLaneHazardCount > 0 
+                ? 'bg-gradient-to-br from-[#e74c3c]/20 to-[#c0392b]/10 border-[#e74c3c]/30' 
+                : 'bg-gradient-to-br from-[#2ecc71]/20 to-[#27ae60]/10 border-[#2ecc71]/30'
+            } shadow-xl`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <AlertTriangle className={`w-5 h-5 ${driverLaneHazardCount > 0 ? 'text-[#e74c3c]' : 'text-[#2ecc71]'}`} />
+            </div>
+            <div className="text-xs text-gray-400 mb-1">Lane Hazards</div>
+            <div className={`text-xl font-bold ${driverLaneHazardCount > 0 ? 'text-[#e74c3c]' : 'text-[#2ecc71]'}`}>
               {driverLaneHazardCount}
             </div>
-          </div>
+          </motion.div>
         </motion.div>
 
-        {/* Mode Control Panel */}
+        {/* Mode Control Panel - Enhanced */}
         <motion.div 
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
-          className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 mb-6"
+          className="bg-white/5 backdrop-blur-xl rounded-3xl p-6 border border-white/10 shadow-2xl mb-6"
         >
-          <h2 className="text-white text-lg font-semibold mb-4">Detection Mode</h2>
+          <div className="flex items-center gap-3 mb-6">
+            <Zap className="text-[#f39c12] w-6 h-6" />
+            <h2 className="text-white text-xl font-bold">Detection Mode</h2>
+          </div>
           
           <div className="flex flex-wrap gap-4 mb-4">
             <motion.button
-              whileHover={{ scale: 1.02 }}
+              whileHover={{ scale: 1.02, y: -2 }}
               whileTap={{ scale: 0.98 }}
-              className={`flex-1 min-w-[150px] px-6 py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-3 ${
+              className={`flex-1 min-w-[180px] px-6 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 ${
                 detectionMode === 'live' 
-                  ? 'bg-gradient-to-r from-[#3498db] to-[#2980b9] text-white shadow-lg' 
+                  ? 'bg-gradient-to-r from-[#3498db] to-[#2980b9] text-white shadow-xl shadow-[#3498db]/30' 
                   : 'bg-white/5 text-gray-300 hover:bg-white/10 border border-white/20'
               } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={() => handleModeSwitch('live')}
@@ -633,11 +665,11 @@ export default function LiveMode() {
             </motion.button>
 
             <motion.button
-              whileHover={{ scale: 1.02 }}
+              whileHover={{ scale: 1.02, y: -2 }}
               whileTap={{ scale: 0.98 }}
-              className={`flex-1 min-w-[150px] px-6 py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-3 ${
+              className={`flex-1 min-w-[180px] px-6 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 ${
                 detectionMode === 'video' 
-                  ? 'bg-gradient-to-r from-[#9b59b6] to-[#8e44ad] text-white shadow-lg' 
+                  ? 'bg-gradient-to-r from-[#9b59b6] to-[#8e44ad] text-white shadow-xl shadow-[#9b59b6]/30' 
                   : 'bg-white/5 text-gray-300 hover:bg-white/10 border border-white/20'
               } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={() => handleModeSwitch('video')}
@@ -653,7 +685,7 @@ export default function LiveMode() {
             <motion.div 
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
-              className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-white/20"
+              className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-white/10"
             >
               <input
                 ref={fileInputRef}
@@ -666,10 +698,10 @@ export default function LiveMode() {
               />
               <label 
                 htmlFor="video-upload-input" 
-                className={`flex-1 min-w-[150px] px-6 py-3 rounded-xl font-bold cursor-pointer transition-all flex items-center justify-center gap-3 ${
+                className={`flex-1 min-w-[180px] px-6 py-3 rounded-2xl font-bold cursor-pointer transition-all flex items-center justify-center gap-3 ${
                   uploading 
                     ? 'bg-white/10 text-gray-400 cursor-not-allowed' 
-                    : 'bg-gradient-to-r from-[#2ecc71] to-[#27ae60] text-white hover:shadow-lg'
+                    : 'bg-gradient-to-r from-[#2ecc71] to-[#27ae60] text-white hover:shadow-xl shadow-lg shadow-[#2ecc71]/30'
                 }`}
               >
                 <Upload className="w-5 h-5" />
@@ -680,9 +712,9 @@ export default function LiveMode() {
                 <motion.button 
                   initial={{ scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  whileHover={{ scale: 1.02 }}
+                  whileHover={{ scale: 1.02, y: -2 }}
                   whileTap={{ scale: 0.98 }}
-                  className="flex-1 min-w-[150px] px-6 py-3 rounded-xl font-bold bg-gradient-to-r from-[#e74c3c] to-[#c0392b] text-white hover:shadow-lg transition-all flex items-center justify-center gap-3"
+                  className="flex-1 min-w-[180px] px-6 py-3 rounded-2xl font-bold bg-gradient-to-r from-[#e74c3c] to-[#c0392b] text-white hover:shadow-xl shadow-lg shadow-[#e74c3c]/30 transition-all flex items-center justify-center gap-3"
                   onClick={handleStopVideo}
                 >
                   <StopCircle className="w-5 h-5" />
@@ -693,40 +725,46 @@ export default function LiveMode() {
           )}
         </motion.div>
 
-        {/* Video and Map Grid */}
+        {/* Video and Map Grid - Enhanced */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Processed Stream */}
+          {/* Processed Stream - Modern Design */}
           <motion.div 
             initial={{ x: -30, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: 0.3 }}
-            className="bg-white/10 backdrop-blur-lg rounded-2xl overflow-hidden border border-white/20 shadow-2xl"
+            className="bg-white/5 backdrop-blur-xl rounded-3xl overflow-hidden border border-white/10 shadow-2xl"
           >
-            <div className="bg-white/5 px-6 py-4 border-b border-white/20 flex items-center justify-between">
-              <h3 className="text-white font-semibold flex items-center gap-2">
-                <Camera className="text-[#3498db] w-5 h-5" />
+            <div className="bg-gradient-to-r from-white/10 to-white/5 px-6 py-4 border-b border-white/10 flex items-center justify-between">
+              <h3 className="text-white font-bold flex items-center gap-3 text-lg">
+                <div className="p-2 bg-[#3498db]/20 rounded-lg">
+                  <Camera className="text-[#3498db] w-5 h-5" />
+                </div>
                 Processed Stream
               </h3>
-              <div className="flex items-center gap-2 text-sm">
+              <div className="flex items-center gap-3 px-4 py-2 bg-white/5 rounded-full">
                 <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-[#2ecc71]' : 'bg-[#e74c3c]'} animate-pulse`}></span>
-                <span className="text-white">{fps} fps</span>
+                <span className="text-white font-semibold">{fps} fps</span>
               </div>
             </div>
             
             <div 
               ref={canvasContainerRef}
-              className="relative w-full h-[400px] bg-black/50 overflow-hidden"
+              className="relative w-full h-[450px] bg-gradient-to-br from-black/60 to-black/40 overflow-hidden"
             >
               {!isConnected && (
                 <div className="absolute inset-0 flex items-center justify-center z-20">
                   <div className="text-center">
-                    <div className="w-16 h-16 border-4 border-[#3498db] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                    <p className="text-white">Connecting to stream...</p>
+                    <motion.div 
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      className="w-16 h-16 border-4 border-[#3498db] border-t-transparent rounded-full mx-auto mb-4"
+                    ></motion.div>
+                    <p className="text-white/80 text-lg">Connecting to stream...</p>
                   </div>
                 </div>
               )}
               {error && (
-                <div className="absolute inset-0 flex items-center justify-center z-20 bg-red-900/20">
+                <div className="absolute inset-0 flex items-center justify-center z-20 bg-red-900/20 backdrop-blur-sm">
                   <div className="text-center p-4">
                     <p className="text-red-400 text-sm">{error}</p>
                   </div>
@@ -740,32 +778,33 @@ export default function LiveMode() {
                 className="absolute inset-0 w-full h-full object-cover z-0"
                 style={{ display: isConnected ? 'block' : 'none' }}
               />
-              {/* Canvas will be inserted here dynamically by WebSocket handler */}
             </div>
 
-            {/* Legend */}
-            <div className="bg-white/5 px-6 py-3 flex gap-6 text-sm">
+            {/* Legend - Enhanced */}
+            <div className="bg-white/5 px-6 py-4 flex gap-6 text-sm border-t border-white/10">
               <div className="flex items-center gap-2">
-                <span className="w-4 h-4 rounded bg-[#00ff00]"></span>
-                <span className="text-gray-300">Road hazards</span>
+                <span className="w-4 h-4 rounded bg-[#00ff00] shadow-lg shadow-[#00ff00]/50"></span>
+                <span className="text-gray-300 font-medium">Road hazards</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-4 h-4 rounded bg-[#00ffff]"></span>
-                <span className="text-gray-300">Standard objects</span>
+                <span className="w-4 h-4 rounded bg-[#00ffff] shadow-lg shadow-[#00ffff]/50"></span>
+                <span className="text-gray-300 font-medium">Standard objects</span>
               </div>
             </div>
           </motion.div>
 
-          {/* Hazard Map */}
+          {/* Hazard Map - Enhanced */}
           <motion.div 
             initial={{ x: 30, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: 0.4 }}
-            className="bg-white/10 backdrop-blur-lg rounded-2xl overflow-hidden border border-white/20 shadow-2xl"
+            className="bg-white/5 backdrop-blur-xl rounded-3xl overflow-hidden border border-white/10 shadow-2xl"
           >
-            <div className="bg-white/5 px-6 py-4 border-b border-white/20 flex items-center justify-between">
-              <h3 className="text-white font-semibold flex items-center gap-2">
-                <MapPin className="text-[#e74c3c] w-5 h-5" />
+            <div className="bg-gradient-to-r from-white/10 to-white/5 px-6 py-4 border-b border-white/10 flex items-center justify-between">
+              <h3 className="text-white font-bold flex items-center gap-3 text-lg">
+                <div className="p-2 bg-[#e74c3c]/20 rounded-lg">
+                  <MapPin className="text-[#e74c3c] w-5 h-5" />
+                </div>
                 Hazard Map
               </h3>
             </div>
@@ -773,7 +812,7 @@ export default function LiveMode() {
             <iframe
               src="/Map.html"
               title="Road Hazard Map"
-              className="w-full h-[400px] border-none bg-white/5"
+              className="w-full h-[450px] border-none bg-white/5"
               allowFullScreen
             />
           </motion.div>
@@ -786,7 +825,6 @@ export default function LiveMode() {
           onNotificationSent={handleNotificationSent}
         />
 
-        {/* NearbyHazardNotifier now handles pothole notifications */}
         <NearbyHazardNotifier currentLocation={currentLocation} />
 
         <EmergencyBrakeNotifier 
@@ -798,7 +836,8 @@ export default function LiveMode() {
       <ToastContainer 
         position="bottom-right"
         theme="dark"
-        toastClassName="backdrop-blur-lg bg-white/10"
+        toastClassName="backdrop-blur-xl bg-white/10 border border-white/20"
+        progressClassName="bg-gradient-to-r from-[#3498db] to-[#2ecc71]"
       />
     </motion.div>
   );

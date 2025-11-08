@@ -61,17 +61,16 @@ function AnimatedRoutes() {
 }
 
 export default function App() {
-  const [showVideoLoader, setShowVideoLoader] = useState(true);
-  const [hasSeenLoader, setHasSeenLoader] = useState(false);
-
-  useEffect(() => {
+  // Initialize state based on sessionStorage immediately to prevent double loading
+  const [showVideoLoader, setShowVideoLoader] = useState(() => {
     // Check if user has seen the loader before (stored in sessionStorage)
     const seenLoader = sessionStorage.getItem('hasSeenVideoLoader');
-    if (seenLoader === 'true') {
-      setShowVideoLoader(false);
-      setHasSeenLoader(true);
-    }
-  }, []);
+    return seenLoader !== 'true'; // Show loader only if not seen before
+  });
+  const [hasSeenLoader, setHasSeenLoader] = useState(() => {
+    const seenLoader = sessionStorage.getItem('hasSeenVideoLoader');
+    return seenLoader === 'true';
+  });
 
   const handleVideoComplete = () => {
     setShowVideoLoader(false);

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import PWAInstallPrompt from './PWAInstallPrompt';
+import Car3DModel from './Car3DModel';
 
 // Animated Road Component
 function AnimatedRoad() {
@@ -171,19 +172,29 @@ function Navigation() {
   );
 }
 
-// Hero Section with Road Animation
+// Hero Section with 3D Car Model
 function HeroSection() {
   const { scrollY } = useScroll();
   const opacity = useTransform(scrollY, [0, 300], [1, 0]);
   const scale = useTransform(scrollY, [0, 300], [1, 0.8]);
+  const [isDetectionActive, setIsDetectionActive] = useState(false);
 
   return (
     <motion.section 
       style={{ opacity, scale }}
       className="relative min-h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460]"
     >
+      {/* 3D Car Model - Full Screen Background */}
+      <div className="absolute inset-0 z-0">
+        <Car3DModel isDetectionActive={isDetectionActive} />
+      </div>
+
+      {/* Gradient overlay for content readability */}
+      <div className="absolute inset-0 z-[1] bg-gradient-to-r from-[#1a1a2e]/95 via-[#1a1a2e]/80 to-transparent"></div>
+      <div className="absolute inset-0 z-[1] bg-gradient-to-b from-transparent via-transparent to-[#1a1a2e]/90"></div>
+
       {/* Animated road grid background */}
-      <div className="absolute inset-0 overflow-hidden opacity-20">
+      <div className="absolute inset-0 overflow-hidden opacity-10 z-[1]">
         <div className="absolute inset-0" style={{
           backgroundImage: 'linear-gradient(0deg, transparent 24%, rgba(52, 152, 219, .3) 25%, rgba(52, 152, 219, .3) 26%, transparent 27%, transparent 74%, rgba(52, 152, 219, .3) 75%, rgba(52, 152, 219, .3) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(52, 152, 219, .3) 25%, rgba(52, 152, 219, .3) 26%, transparent 27%, transparent 74%, rgba(52, 152, 219, .3) 75%, rgba(52, 152, 219, .3) 76%, transparent 77%, transparent)',
           backgroundSize: '50px 50px'
@@ -191,13 +202,15 @@ function HeroSection() {
         </div>
       </div>
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6 py-20 grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-        {/* Left Content */}
-        <motion.div
-          initial={{ opacity: 0, x: -50 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.8 }}
-        >
+      <div className="relative z-10 max-w-7xl mx-auto px-6 py-20 w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+          {/* Left Content */}
+          <motion.div
+            initial={{ opacity: 0, x: -50 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8 }}
+            className="relative z-10"
+          >
           <motion.h1 
             className="text-6xl lg:text-7xl font-extrabold text-white mb-6 leading-tight"
             initial={{ opacity: 0, y: 20 }}
@@ -231,6 +244,7 @@ function HeroSection() {
               <motion.button
                 whileHover={{ scale: 1.05, boxShadow: "0 20px 40px rgba(52, 152, 219, 0.4)" }}
                 whileTap={{ scale: 0.95 }}
+                onClick={() => setIsDetectionActive(true)}
                 className="px-8 py-4 bg-gradient-to-r from-[#3498db] to-[#2980b9] text-white rounded-full font-bold text-lg shadow-xl flex items-center gap-3 hover:shadow-2xl transition-all group"
               >
                 <Camera className="w-5 h-5" />
@@ -273,16 +287,9 @@ function HeroSection() {
           </motion.div>
         </motion.div>
 
-        {/* Right Road Animation */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 1 }}
-          className="h-[500px] relative"
-        >
-          <AnimatedRoad />
-          
-          {/* Floating cards */}
+        {/* Right side - empty space for car visibility */}
+        <div className="hidden lg:block relative z-[2]">
+          {/* Floating cards positioned over the car */}
           <motion.div
             animate={{ y: [0, -20, 0] }}
             transition={{ duration: 3, repeat: Infinity }}
@@ -307,11 +314,12 @@ function HeroSection() {
               rotate: [0, 5, -5, 0]
             }}
             transition={{ duration: 4, repeat: Infinity, delay: 0.5 }}
-            className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white/10 backdrop-blur-lg p-4 rounded-full border border-white/20 shadow-xl"
+            className="absolute top-1/2 right-20 transform -translate-y-1/2 bg-white/10 backdrop-blur-lg p-4 rounded-full border border-white/20 shadow-xl"
           >
             <Zap className="text-[#f39c12] w-10 h-10" />
           </motion.div>
-        </motion.div>
+        </div>
+        </div>
       </div>
 
       {/* Scroll indicator */}
