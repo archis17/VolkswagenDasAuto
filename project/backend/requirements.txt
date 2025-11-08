@@ -11,12 +11,26 @@ torch>=2.0.0
 opencv-python>=4.8.0
 numpy>=1.24.0
 
-# Database
-pymongo>=4.5.0
+# Database - PostgreSQL/PostGIS for Neon DB
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+sqlalchemy>=2.0.0
+geoalchemy2>=0.14.0
 
 # Environment Variables
 python-dotenv>=1.0.0
 
 # Data Validation (included with FastAPI but explicit for clarity)
 pydantic>=2.0.0
+
+# Redis for duplicate detection and caching
+redis>=5.0.0
+hiredis>=2.2.0
+
+# GPS and Metadata Extraction
+Pillow>=10.0.0
+exifread>=3.0.0
+
+# MQTT for IoT integration
+aiomqtt>=2.0.0
 

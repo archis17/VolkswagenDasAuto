@@ -2,12 +2,13 @@ import cv2
 import threading
 import queue
 import os
+import time
 from pathlib import Path
 
 class VideoFileManager:
     def __init__(self):
         self.video_path = None
-        self.frame_queue = queue.Queue(maxsize=1)
+        self.frame_queue = queue.Queue(maxsize=2)  # Increased buffer for smoother playback
         self.running = False
         self.thread = None
         self.cap = None
@@ -16,6 +17,7 @@ class VideoFileManager:
         self.current_frame = 0
         self.uploads_dir = Path(__file__).parent / "uploads"
         self.uploads_dir.mkdir(exist_ok=True)
+        self.last_frame_time = 0
     
     def load_video(self, video_path: str):
         """Load a video file for processing"""
@@ -64,32 +66,49 @@ class VideoFileManager:
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        # Set frame width/height if needed
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        # Optimize video reading - don't force resize, let it use native resolution
+        # Resizing will be handled in websocket_server if needed
         
+        # Calculate frame timing
         frame_delay = 1.0 / self.fps if self.fps > 0 else 0.033
+        self.last_frame_time = time.time()
         
         while self.running:
+            frame_start = time.time()
             ret, frame = self.cap.read()
             if not ret:
                 # End of video or error - loop back to start
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 self.current_frame = 0
+                self.last_frame_time = time.time()
                 continue
             
             self.current_frame += 1
             
-            # Add frame to queue (replace if queue is full)
-            if not self.frame_queue.empty():
+            # Efficiently manage queue - keep only latest frames
+            while self.frame_queue.qsize() >= 2:
                 try:
                     self.frame_queue.get_nowait()
                 except queue.Empty:
-                    pass
-            self.frame_queue.put(frame)
+                    break
             
-            # Control playback speed
-            threading.Event().wait(frame_delay)
+            # Non-blocking put for better performance
+            try:
+                self.frame_queue.put_nowait(frame)
+            except queue.Full:
+                # Queue full, drop oldest and add new
+                try:
+                    self.frame_queue.get_nowait()
+                    self.frame_queue.put_nowait(frame)
+                except queue.Empty:
+                    pass
+            
+            # Precise timing control - only sleep if we're ahead of schedule
+            elapsed = time.time() - frame_start
+            sleep_time = frame_delay - elapsed
+            if sleep_time > 0.001:  # Only sleep if significant time remaining
+                time.sleep(sleep_time)
+            # If reading is slow, continue immediately (maintains real-time playback)
     
     def get_progress(self):
         """Get current playback progress"""

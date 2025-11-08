@@ -1,70 +1,96 @@
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
+import ErrorBoundary from './components/ErrorBoundary';
+import VideoLoader from './components/VideoLoader';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
+import LandingPage from './components/LandingPage';
 import LiveMode from './components/LiveMode';
 import PotholeMap from './components/PotholeMap';
-import './App.css';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
+
+// Page transition variants
+const pageVariants = {
+  initial: {
+    opacity: 0,
+    x: -20,
+  },
+  enter: {
+    opacity: 1,
+    x: 0,
+    transition: {
+      duration: 0.4,
+      ease: 'easeOut',
+    },
+  },
+  exit: {
+    opacity: 0,
+    x: 20,
+    transition: {
+      duration: 0.3,
+      ease: 'easeIn',
+    },
+  },
+};
+
+// Page wrapper component
+function PageWrapper({ children }) {
+  return (
+    <motion.div
+      initial="initial"
+      animate="enter"
+      exit="exit"
+      variants={pageVariants}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+function AnimatedRoutes() {
+  const location = useLocation();
+
+  return (
+    <AnimatePresence mode="wait">
+      <Routes location={location} key={location.pathname}>
+        <Route path="/" element={<PageWrapper><LandingPage /></PageWrapper>} />
+        <Route path="/live" element={<PageWrapper><LiveMode /></PageWrapper>} />
+        <Route path="/pothole-map" element={<PageWrapper><PotholeMap /></PageWrapper>} />
+        <Route path="/analytics" element={<PageWrapper><AnalyticsDashboard /></PageWrapper>} />
+      </Routes>
+    </AnimatePresence>
+  );
+}
 
 export default function App() {
+  // Initialize state based on sessionStorage immediately to prevent double loading
+  const [showVideoLoader, setShowVideoLoader] = useState(() => {
+    // Check if user has seen the loader before (stored in sessionStorage)
+    const seenLoader = sessionStorage.getItem('hasSeenVideoLoader');
+    return seenLoader !== 'true'; // Show loader only if not seen before
+  });
+  const [hasSeenLoader, setHasSeenLoader] = useState(() => {
+    const seenLoader = sessionStorage.getItem('hasSeenVideoLoader');
+    return seenLoader === 'true';
+  });
+
+  const handleVideoComplete = () => {
+    setShowVideoLoader(false);
+    setHasSeenLoader(true);
+    // Remember that user has seen the loader in this session
+    sessionStorage.setItem('hasSeenVideoLoader', 'true');
+  };
+
   return (
-    <Router>
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <div className="home-container">
-              <div className="hero-section">
-                <div className="hero-content">
-                  <h1>Hazard Eye</h1>
-                  <p className="tagline">Enhancing road safety with AI-powered detection</p>
-                  
-                  <div className="features-grid">
-                    <div className="feature-card">
-                      <div className="feature-icon">🔍</div>
-                      <h3>Real-time Detection</h3>
-                      <p>Identify road hazards instantly using advanced YOLO technology</p>
-                    </div>
-                    <div className="feature-card">
-                      <div className="feature-icon">🗺️</div>
-                      <h3>Interactive Mapping</h3>
-                      <p>View and track hazards on an interactive map interface</p>
-                    </div>
-                    <div className="feature-card">
-                      <div className="feature-icon">⚠️</div>
-                      <h3>Alert System</h3>
-                      <p>Receive notifications when approaching known hazards</p>
-                    </div>
-                  </div>
-                  
-                  <div className="button-container">
-                    <Link to="/live">
-                      <button className="live-mode-btn">
-                        <span className="btn-icon">▶️</span>
-                        <span className="btn-text">Live Detection</span>
-                      </button>
-                    </Link>
-                    <Link to="/pothole-map">
-                      <button className="pothole-map-btn">
-                        <span className="btn-icon">🗺️</span>
-                        <span className="btn-text">View Hazard Map</span>
-                      </button>
-                    </Link>
-                  </div>
-                </div>
-                <div className="hero-image">
-                  <div className="image-container">
-                    <div className="overlay-text">AI-Powered Road Safety</div>
-                  </div>
-                </div>
-              </div>
-              
-              <footer className="home-footer">
-                <p>© 2025 Road Hazard Detection System | Powered by YOLO Object Detection</p>
-              </footer>
-            </div>
-          }
-        />
-        <Route path="/live" element={<LiveMode />} />
-        <Route path="/pothole-map" element={<PotholeMap />} />
-      </Routes>
-    </Router>
+    <ErrorBoundary>
+      {showVideoLoader ? (
+        <VideoLoader onComplete={handleVideoComplete} />
+      ) : (
+        <Router>
+          <AnimatedRoutes />
+          <PWAInstallPrompt />
+        </Router>
+      )}
+    </ErrorBoundary>
   );
 }

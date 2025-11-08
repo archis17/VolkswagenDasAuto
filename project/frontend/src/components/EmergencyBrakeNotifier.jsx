@@ -1,21 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
+import voiceAlertService from '../services/voiceAlertService';
+import { getEmergencyMessage } from '../config/voiceMessages';
 
 export default function EmergencyBrakeNotifier({ hazardDistances = [], driverLaneHazardCount = 0 }) {
   const emergencyBrakeAlertRef = useRef(null);
-  const emergencyBrakeAudioRef = useRef(null);
   const [activeHazards, setActiveHazards] = useState([]);
+  const lastEmergencyAlertRef = useRef(null);
   
+  // Cleanup voice alerts on unmount
   useEffect(() => {
-    // Initialize emergency brake sound
-    emergencyBrakeAudioRef.current = new Audio('/emergency-brake.mp3');
-    emergencyBrakeAudioRef.current.loop = false;
-    
     return () => {
-      if (emergencyBrakeAudioRef.current) {
-        emergencyBrakeAudioRef.current.pause();
-        emergencyBrakeAudioRef.current = null;
-      }
+      voiceAlertService.stop();
     };
   }, []);
   
@@ -34,11 +30,18 @@ export default function EmergencyBrakeNotifier({ hazardDistances = [], driverLan
       
       // Show alert if we have close range hazards and no alert is currently showing
       if (closeRangeHazards.length > 0 && !emergencyBrakeAlertRef.current) {
-        // Play emergency brake sound
-        if (emergencyBrakeAudioRef.current) {
-          emergencyBrakeAudioRef.current.play().catch(err => 
-            console.error("Error playing emergency brake sound:", err)
-          );
+        // Get the first close-range hazard for voice alert
+        const firstHazard = closeRangeHazards[0];
+        const hazardType = firstHazard.class || 'obstacle';
+        const distance = firstHazard.distance ? Math.round(firstHazard.distance) : null;
+        
+        // Get emergency voice message
+        const emergencyMessage = getEmergencyMessage(hazardType, distance);
+        
+        // Trigger emergency voice alert (will interrupt any lower priority alerts)
+        if (emergencyMessage && (!lastEmergencyAlertRef.current || Date.now() - lastEmergencyAlertRef.current > 5000)) {
+          voiceAlertService.emergency(emergencyMessage);
+          lastEmergencyAlertRef.current = Date.now();
         }
         
         // Show emergency brake toast
@@ -75,11 +78,8 @@ export default function EmergencyBrakeNotifier({ hazardDistances = [], driverLan
   useEffect(() => {
     // If we have an active alert but no more active hazards, dismiss the alert
     if (emergencyBrakeAlertRef.current && activeHazards.length === 0) {
-      // Stop the sound
-      if (emergencyBrakeAudioRef.current) {
-        emergencyBrakeAudioRef.current.pause();
-        emergencyBrakeAudioRef.current.currentTime = 0;
-      }
+      // Stop any ongoing voice alerts (emergency alerts will complete naturally)
+      // Only stop if we're sure the emergency is cleared
       
       // Dismiss the toast
       toast.dismiss(emergencyBrakeAlertRef.current);

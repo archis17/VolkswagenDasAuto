@@ -3,19 +3,19 @@
 # ============================================
 
 # Python cache files
-__pycache__/
+/project/backend/__pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 
 # Virtual environments
-venv/
+/project/backend/venv/
 env/
 ENV/
-env.bak/
-venv.bak/
-.venv
+/project/backend/env.bak/
+/project/backend/venv.bak/
+/project/backend/.venv
 
 # Distribution / packaging
 dist/

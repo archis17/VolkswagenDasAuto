@@ -13,7 +13,7 @@ Hazard_Eye is a smart road safety system that detects real-time hazards such as 
 - **Live Hazard Detection** using YOLOv12
 - **Real-time Alerts** through UI and automated notifications
 - **Smart Braking Simulation** logic based on object proximity
-- **Map Integration** using TomTom API to visualize hazard zones
+- **Map Integration** using OpenStreetMap (Leaflet.js) to visualize hazard zones
 - **Automated Reporting** with email alerts and geo-tagged locations
 
 ---
@@ -25,7 +25,7 @@ Hazard_Eye is a smart road safety system that detects real-time hazards such as 
 | Frontend    | React.js, HTML, CSS, JavaScript   |
 | Backend     | FastAPI (Python)                  |
 | AI Model    | YOLOv12 (PyTorch)                  |
-| Mapping     | TomTom Maps API                   |
+| Mapping     | OpenStreetMap (Leaflet.js)       |
 | Deployment  | Uvicorn, GitHub, Localhost        |
 | Extras      | SMTP Email, Geolocation, JSON APIs|
 
@@ -105,10 +105,11 @@ Once both servers are running, access the application at:
 
 ## 🌍 Map Visualization
 
-- Uses **TomTom Maps API**
+- Uses **OpenStreetMap** with **Leaflet.js** (free and open-source)
 - Plots hazard zones dynamically based on detection
-- Realtime and interactive map view on frontend
-- Can highlight high-risk areas over time
+- Real-time and interactive map view on frontend
+- Heatmap visualization for high-risk areas
+- No API key required - completely free to use
 
 ---
 
@@ -117,7 +118,7 @@ Once both servers are running, access the application at:
 - 🚧 95%+ detection accuracy using YOLOv12
 - ⚠️ 70% faster hazard response simulation
 - 📤 80% reduction in manual reporting efforts
-- 📍 Over 10 zones mapped using TomTom Maps
+- 📍 Over 10 zones mapped using OpenStreetMap
 
 ---
 

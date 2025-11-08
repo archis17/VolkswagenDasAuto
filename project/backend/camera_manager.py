@@ -6,11 +6,13 @@ import time
 class CameraManager:
     def __init__(self):
         self.active_camera = None
-        self.frame_queue = queue.Queue(maxsize=1)
+        self.frame_queue = queue.Queue(maxsize=2)  # Increased buffer for smoother capture
         self.running = False
         self.thread = None
         self.cap = None
         self.camera_available = False
+        self.target_fps = 30  # Increased FPS for smoother video
+        self.last_frame_time = 0
         
     def _find_available_camera(self):
         """Try to find an available camera"""
@@ -77,10 +79,33 @@ class CameraManager:
                         time.sleep(reconnect_delay)
                         continue
                     
+                    # Optimize camera settings for maximum performance
+                    try:
+                        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer lag
+                    except Exception:
+                        pass
+                    
+                    # Set resolution (can be adjusted based on camera capability)
                     self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
                     self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                    
+                    # Set FPS if supported
+                    try:
+                        self.cap.set(cv2.CAP_PROP_FPS, self.target_fps)
+                    except Exception:
+                        pass
+                    
+                    # Additional optimizations for faster capture
+                    try:
+                        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M','J','P','G'))  # Use MJPEG for faster capture
+                    except Exception:
+                        pass
+                    
                     reconnect_attempts = 0
+                    self.last_frame_time = time.time()
                 
+                # Pace capture to target FPS
+                start_ts = time.time()
                 ret, frame = self.cap.read()
                 if not ret:
                     reconnect_attempts += 1
@@ -95,13 +120,31 @@ class CameraManager:
                 
                 reconnect_attempts = 0
                 
-                if not self.frame_queue.empty():
+                # Efficiently manage queue - keep only latest frames
+                while self.frame_queue.qsize() >= 2:
                     try:
                         self.frame_queue.get_nowait()
                     except queue.Empty:
-                        pass
-                self.frame_queue.put(frame)
+                        break
                 
+                # Non-blocking put - drop frame if queue is full (prevents lag)
+                try:
+                    self.frame_queue.put_nowait(frame)
+                except queue.Full:
+                    # Queue full, drop oldest and add new
+                    try:
+                        self.frame_queue.get_nowait()
+                        self.frame_queue.put_nowait(frame)
+                    except queue.Empty:
+                        pass
+                
+                # Precise FPS control with minimal sleep overhead
+                elapsed = time.time() - start_ts
+                min_interval = 1.0 / float(self.target_fps)
+                sleep_time = min_interval - elapsed
+                if sleep_time > 0.001:  # Only sleep if significant time remaining
+                    time.sleep(sleep_time)
+                # If processing is slow, continue immediately (don't add artificial delay)
             except Exception as e:
                 print(f"Camera error: {e}")
                 time.sleep(reconnect_delay)

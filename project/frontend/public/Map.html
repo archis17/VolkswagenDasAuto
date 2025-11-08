@@ -1,417 +1,165 @@
 <!DOCTYPE html>
-<html lang="en" >
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Example: Routing A-B</title>
-  <link rel='stylesheet' href='https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.1/maps/maps.css'>
-<link rel='stylesheet' href='https://api.tomtom.com/maps-sdk-for-web/6.x/6.25.1//examples/pages/examples/assets/ui-library/index.css'>
-<link rel='stylesheet' href='https://api.tomtom.com/maps-sdk-for-web/6.x/6.25.1//examples/pages/examples/assets/ui-library/icons-css/routing.css'>
-<link rel='stylesheet' href='https://api.tomtom.com/maps-sdk-for-web/cdn/plugins/SearchBox/3.2.0//SearchBox.css'>
-<style>
-    #foldable {
-            width: 320px;
-        }
-        #form {
-            margin-top: 10px;
-        }
-        .icon {
-            background-size: cover;
-            height: 30px;
-            width: 30px;
-        }
-        .tt-icon-size {
-            height: 18px !important;
-            padding: 8px;
-            width: 18px !important;
-        }
-        .icon-spacing-right {
-            margin-right: 12px;
-            margin-top: 22px;
-        }
-        .icon-spacing-left {
-            margin-left: 12px;
-            margin-top: 24px;
-        }
-        .tt-search-box-input {
-            width: calc(100% - 25px) !important;
-        }
-        .searchbox-container {
-            display: flex;
-        }
-
-        .searchbox-container > .tt-search-box {
-            flex: 1;
-            padding-right: 26px;
-        }
-        .my-location-button {
-            background-image: url("https://api.tomtom.com/maps-sdk-for-web/cdn/static/my-location.svg");
-            cursor: pointer;
-            margin-left: 7px;
-            padding: 12px;
-        }
-        .my-location-button:hover {
-            background-image: url("https://api.tomtom.com/maps-sdk-for-web/cdn/static/my-location-hover.svg");
-        }
-        .route-marker {
-            align-items: center;
-            background-color: #4a90e2;
-            border: solid 3px #2faaff;
-            border-radius: 50%;
-            display: flex;
-            height: 32px;
-            justify-content: center;
-            transition: width .1s, height .1s;
-            width: 32px;
-        }
-
-        html {
-            height:100%;
-        }
-</style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hazard Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    html, body {
+      height: 100%;
+      width: 100%;
+    }
+    
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+    
+    .pothole-marker {
+      background-color: #e74c3c;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid #c0392b;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .pothole-popup {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    .pothole-popup h3 {
+      margin-top: 0;
+      margin-bottom: 8px;
+      color: #2c3e50;
+    }
+    
+    .pothole-popup p {
+      margin: 4px 0;
+    }
+  </style>
 </head>
 <body>
-<!-- partial:index.partial.html -->
-<body>
-    <div id='map' class='map'>
-        <div id='foldable' class='tt-overlay-panel -left-top -medium js-foldable'>
-            <form id=form>
-                <div id='startSearchBox' class='searchbox-container'>
-                    <div class='tt-icon tt-icon-size icon-spacing-right -start'></div>
-                </div>
-                <div id='finishSearchBox' class='searchbox-container'>
-                    <div class='tt-icon tt-icon-size icon-spacing-right -finish'></div>
-                </div>
-            </form>
-        </div>
-    </div>
+  <div id="map"></div>
+  
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script>
+    // Initialize map with default center (will be adjusted when data loads)
+    const map = L.map('map').setView([0, 0], 2);
     
+    // Add OpenStreetMap tile layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    }).addTo(map);
     
+    const markers = [];
+    let heatmapLayer = null;
     
-    
-    
-    
-    
-</body>
-<!-- partial -->
-  <script src='https://api.tomtom.com/maps-sdk-for-web/cdn/plugins/SearchBox/3.2.0//SearchBox-web.js'></script>
-<script src='https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.1/maps/maps-web.min.js'></script>
-<script src='https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.1/services/services-web.min.js'></script>
-<script src='https://api.tomtom.com/maps-sdk-for-web/6.x/6.25.1//examples/pages/examples/assets/js/mobile-or-tablet.js'></script>
-<script src='https://api.tomtom.com/maps-sdk-for-web/6.x/6.25.1//examples/pages/examples/assets/js/info-hint.js'></script>
-<script src='https://api.tomtom.com/maps-sdk-for-web/6.x/6.25.1//examples/pages/examples/assets/js/search/searchbox-enter-submit.js'></script>
-<script src='https://api.tomtom.com/maps-sdk-for-web/6.x/6.25.1//examples/pages/examples/assets/js/foldable.js'></script>
-<script>
-    var map = tt.map({
-    key: 'HONwvVKmEJdNAPsO358cGA7AhakHmuPV',
-    container: 'map',
-    dragPan: !window.isMobileOrTablet()
-});
-map.addControl(new tt.FullscreenControl());
-map.addControl(new tt.NavigationControl());
-new Foldable('#foldable', 'top-right');
-var bounds = new tt.LngLatBounds();
-
-// Add pothole markers to the map
-function loadPotholeData() {
-    fetch('/api/hazard-reports')
+    // Function to load and display pothole data
+    function loadPotholeData() {
+      fetch('/api/hazard-reports')
         .then(response => response.json())
         .then(potholes => {
-            // Add markers for each pothole
-            potholes.forEach(pothole => {
-                // Create custom marker element
-                var marker = document.createElement('div');
-                marker.className = 'pothole-marker';
-                marker.style.width = '20px';
-                marker.style.height = '20px';
-                marker.style.borderRadius = '50%';
-                marker.style.backgroundColor = '#e74c3c';
-                marker.style.border = '2px solid #c0392b';
-                
-                // Add marker to map
-                new tt.Marker({ element: marker })
-                    .setLngLat([pothole.location.lng, pothole.location.lat])
-                    .addTo(map)
-                    .setPopup(new tt.Popup({ offset: 30 })
-                        .setHTML(`
-                            <div class="pothole-popup">
-                                <h3>Road Hazard</h3>
-                                <p>Type: ${pothole.type}</p>
-                                <p>Severity: ${pothole.severity}</p>
-                                <p>Reported: ${new Date(pothole.timestamp).toLocaleString()}</p>
-                                <p>Status: ${pothole.status}</p>
-                            </div>
-                        `));
-                
-                // Extend bounds to include this pothole
-                bounds.extend(tt.LngLat.convert([pothole.location.lng, pothole.location.lat]));
-            });
-            
-            // If we have potholes and no route yet, fit the map to show all potholes
-            if (!map.getLayer('route') && !bounds.isEmpty()) {
-                map.fitBounds(bounds, { duration: 0, padding: 50 });
+          // Clear existing markers
+          markers.forEach(marker => map.removeLayer(marker));
+          markers.length = 0;
+          
+          // Remove existing heatmap if present
+          if (heatmapLayer) {
+            map.removeLayer(heatmapLayer);
+            heatmapLayer = null;
+          }
+          
+          if (potholes.length === 0) {
+            return;
+          }
+          
+          const bounds = L.latLngBounds([]);
+          
+          // Add markers for each pothole
+          potholes.forEach(pothole => {
+            if (!pothole.location || !pothole.location.lat || !pothole.location.lng) {
+              return;
             }
             
-            // Add heat map layer if there are many potholes
-            if (potholes.length > 10) {
-                const points = potholes.map(pothole => ({
-                    lng: pothole.location.lng,
-                    lat: pothole.location.lat,
-                    value: 1
-                }));
-                
-                // Check if heatmap already exists
-                if (map.getLayer('heatmap-layer')) {
-                    map.removeLayer('heatmap-layer');
-                    map.removeSource('heatmap-source');
+            // Create custom marker element
+            const markerElement = document.createElement('div');
+            markerElement.className = 'pothole-marker';
+            
+            // Create marker
+            const marker = L.marker([pothole.location.lat, pothole.location.lng], {
+              icon: L.divIcon({
+                className: 'hazard-marker',
+                html: markerElement.outerHTML,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+              })
+            }).addTo(map);
+            
+            // Create popup content
+            const popupContent = `
+              <div class="pothole-popup">
+                <h3>Road Hazard</h3>
+                <p><strong>Type:</strong> ${pothole.type || 'Unknown'}</p>
+                <p><strong>Severity:</strong> ${pothole.severity || 'N/A'}</p>
+                <p><strong>Reported:</strong> ${new Date(pothole.timestamp).toLocaleString()}</p>
+                <p><strong>Status:</strong> ${pothole.status || 'reported'}</p>
+              </div>
+            `;
+            
+            marker.bindPopup(popupContent);
+            markers.push(marker);
+            bounds.extend([pothole.location.lat, pothole.location.lng]);
+          });
+          
+          // Fit map to show all markers
+          if (markers.length > 0) {
+            map.fitBounds(bounds, { padding: [50, 50] });
+          }
+          
+          // Add heatmap layer if there are many potholes
+          if (potholes.length > 10 && typeof L.heatLayer !== 'undefined') {
+            const heatPoints = potholes
+              .filter(p => p.location && p.location.lat && p.location.lng)
+              .map(pothole => [pothole.location.lat, pothole.location.lng, 1]);
+            
+            if (heatPoints.length > 0) {
+              heatmapLayer = L.heatLayer(heatPoints, {
+                radius: 40,
+                blur: 15,
+                maxZoom: 17,
+                gradient: {
+                  0.0: 'blue',
+                  0.5: 'cyan',
+                  0.7: 'lime',
+                  0.9: 'yellow',
+                  1.0: 'red'
                 }
-                
-                map.addSource('heatmap-source', {
-                    type: 'geojson',
-                    data: {
-                        type: 'FeatureCollection',
-                        features: points.map(point => ({
-                            type: 'Feature',
-                            properties: {
-                                value: point.value
-                            },
-                            geometry: {
-                                type: 'Point',
-                                coordinates: [point.lng, point.lat]
-                            }
-                        }))
-                    }
-                });
-                
-                map.addLayer({
-                    id: 'heatmap-layer',
-                    type: 'heatmap',
-                    source: 'heatmap-source',
-                    paint: {
-                        'heatmap-weight': ['get', 'value'],
-                        'heatmap-intensity': 0.6,
-                        'heatmap-radius': 40,
-                        'heatmap-color': [
-                            'interpolate',
-                            ['linear'],
-                            ['heatmap-density'],
-                            0, 'rgba(0, 0, 255, 0)',
-                            0.2, 'rgba(0, 0, 255, 0.5)',
-                            0.4, 'rgba(0, 255, 255, 0.7)',
-                            0.6, 'rgba(0, 255, 0, 0.7)',
-                            0.8, 'rgba(255, 255, 0, 0.8)',
-                            1, 'rgba(255, 0, 0, 1)'
-                        ]
-                    }
-                });
+              }).addTo(map);
             }
+          }
         })
         .catch(error => {
-            console.error('Error fetching pothole data:', error);
+          console.error('Error fetching pothole data:', error);
         });
-}
-
-// Load pothole data when the map is loaded
-map.on('load', function() {
-    loadPotholeData();
-});
-
-function RoutingAB() {
-    this.state = {
-        start: undefined,
-        finish: undefined,
-        marker: {
-            start: undefined,
-            finish: undefined
-        }
-    };
-    this.startSearchbox = this.createSearchBox('start');
-    this.createSearchBox('finish');
-    this.closeButton = document.querySelector('.tt-search-box-close-icon');
-    this.startSearchboxInput = this.startSearchbox.getSearchBoxHTML().querySelector('.tt-search-box-input');
-    this.startSearchboxInput.addEventListener('input', this.handleSearchboxInputChange.bind(this));
-    this.createMyLocationButton();
-    this.switchToMyLocationButton();
-    this.errorHint = new InfoHint('error', 'bottom-center', 5000)
-        .addTo(document.getElementById('map'));
-}
-RoutingAB.prototype.createMyLocationButton = function() {
-    this.upperSearchboxIcon = document.createElement('div');
-    this.upperSearchboxIcon.setAttribute('class', 'my-location-button');
-    this.upperSearchboxIcon.addEventListener('click', function() {
-        navigator.geolocation.getCurrentPosition(
-            this.reverseGeocodeCurrentPosition.bind(this),
-            this.handleError.bind(this)
-        );
-    }.bind(this));
-};
-RoutingAB.prototype.handleSearchboxInputChange = function(event) {
-    var inputContent = event.target.value;
-    if (inputContent.length > 0) {
-        this.setCloseButton();
-    } else {
-        var resultList = this.startSearchbox.getSearchBoxHTML().querySelector('.tt-search-box-result-list');
-        if (resultList || inputContent.length === 0) {
-            return;
-        }
-        this.onResultCleared('start');
     }
-};
-RoutingAB.prototype.reverseGeocodeCurrentPosition = function(position) {
-    this.state.start = [position.coords.longitude, position.coords.latitude];
-    tt.services.reverseGeocode({
-        key: 'HONwvVKmEJdNAPsO358cGA7AhakHmuPV',
-        position: this.state.start
-    })
-        .then(this.handleRevGeoResponse.bind(this))
-        .catch(this.handleError.bind(this));
-};
-RoutingAB.prototype.handleRevGeoResponse = function(response) {
-    var place = response.addresses[0];
-    this.state.start = [place.position.lng, place.position.lat];
-    this.startSearchbox.setValue(place.address.freeformAddress);
-    this.onResultSelected(place, 'start');
-};
-RoutingAB.prototype.calculateRoute = function() {
-    if (map.getLayer('route')) {
-        map.removeLayer('route');
-        map.removeSource('route');
-    }
-    if (!this.state.start || !this.state.finish) {
-        return;
-    }
-    this.errorHint.hide();
-    var startPos = this.state.start.join(',');
-    var finalPos = this.state.finish.join(',');
-    tt.services.calculateRoute({
-        key: 'HONwvVKmEJdNAPsO358cGA7AhakHmuPV',
-        traffic: false,
-        locations: startPos + ':' + finalPos
-    })
-        .then(function(response) {
-            var geojson = response.toGeoJson();
-            map.addLayer({
-                'id': 'route',
-                'type': 'line',
-                'source': {
-                    'type': 'geojson',
-                    'data': geojson
-                },
-                'paint': {
-                    'line-color': '#2faaff',
-                    'line-width': 8
-                }
-            }, this.findFirstBuildingLayerId());
-            var coordinates = geojson.features[0].geometry.coordinates;
-            this.updateRoutesBounds(coordinates);
-        }.bind(this))
-        .catch(this.handleError.bind(this));
-};
-RoutingAB.prototype.handleError = function(error) {
-    this.errorHint.setErrorMessage(error);
-};
-RoutingAB.prototype.drawMarker = function(type, viewport) {
-    if (this.state.marker[type]) {
-        this.state.marker[type].remove();
-    }
-    var marker = document.createElement('div');
-    var innerElement = document.createElement('div');
-    marker.className = 'route-marker';
-    innerElement.className = 'icon tt-icon -white -' + type;
-    marker.appendChild(innerElement);
-    this.state.marker[type] = new tt.Marker({ element: marker })
-        .setLngLat(this.state[type])
-        .addTo(map);
-    this.updateBounds(viewport);
-};
-RoutingAB.prototype.updateBounds = function(viewport) {
-    bounds = new tt.LngLatBounds();
-    if (this.state.start) {
-        bounds.extend(tt.LngLat.convert(this.state.start));
-    }
-    if (this.state.finish) {
-        bounds.extend(tt.LngLat.convert(this.state.finish));
-    }
-    if (viewport) {
-        bounds.extend(tt.LngLat.convert(viewport.topLeftPoint));
-        bounds.extend(tt.LngLat.convert(viewport.btmRightPoint));
-    }
-    if (!bounds.isEmpty()) {
-        map.fitBounds(bounds, { duration: 0, padding: 50 });
-    }
-};
-RoutingAB.prototype.updateRoutesBounds = function(coordinates) {
-    bounds = new tt.LngLatBounds();
-    coordinates.forEach(function(point) {
-        bounds.extend(tt.LngLat.convert(point));
+    
+    // Load pothole data when the map is ready
+    map.whenReady(function() {
+      loadPotholeData();
+      
+      // Refresh data every 30 seconds
+      setInterval(loadPotholeData, 30000);
     });
-    if (!bounds.isEmpty()) {
-        map.fitBounds(bounds, { duration: 0, padding: 50 });
-    }
-};
-RoutingAB.prototype.createSearchBox = function(type) {
-    var searchBox = new tt.plugins.SearchBox(tt.services, {
-        showSearchButton: false,
-        searchOptions: {
-            key: 'HONwvVKmEJdNAPsO358cGA7AhakHmuPV'
-        },
-        labels: {
-            placeholder: 'Query e.g. Washington'
-        }
-    });
-    document.getElementById(type + 'SearchBox').appendChild(searchBox.getSearchBoxHTML());
-    searchBox.on('tomtom.searchbox.resultsfound', function(event) {
-        handleEnterSubmit(event, this.onResultSelected.bind(this), this.errorHint, type);
-    }.bind(this));
-    searchBox.on('tomtom.searchbox.resultselected', function(event) {
-        if (event.data && event.data.result) {
-            this.onResultSelected(event.data.result, type);
-        }
-    }.bind(this));
-    searchBox.on('tomtom.searchbox.resultscleared', this.onResultCleared.bind(this, type));
-    return searchBox;
-};
-RoutingAB.prototype.onResultSelected = function(result, type) {
-    var pos = result.position;
-    this.state[type] = [pos.lng, pos.lat];
-    if (type === 'start') {
-        this.setCloseButton();
-    }
-    this.drawMarker(type, result.viewport);
-    this.calculateRoute();
-};
-RoutingAB.prototype.onResultCleared = function(type) {
-    this.state[type] = undefined;
-    if (this.state.marker[type]) {
-        this.state.marker[type].remove();
-        this.updateBounds();
-    }
-    if (type === 'start') {
-        this.switchToMyLocationButton();
-    }
-    this.calculateRoute();
-};
-RoutingAB.prototype.setCloseButton = function() {
-    var inputContainer = document.querySelector('.tt-search-box-input-container');
-    this.closeButton.classList.remove('-hidden');
-    if (document.querySelector('.my-location-button')) {
-        inputContainer.replaceChild(this.closeButton, this.upperSearchboxIcon);
-    }
-};
-RoutingAB.prototype.switchToMyLocationButton = function() {
-    var inputContainer = document.querySelector('.tt-search-box-input-container');
-    inputContainer.replaceChild(this.upperSearchboxIcon, this.closeButton);
-};
-RoutingAB.prototype.findFirstBuildingLayerId = function() {
-    var layers = map.getStyle().layers;
-    for (var index in layers) {
-        if (layers[index].type === 'fill-extrusion') {
-            return layers[index].id;
-        }
-    }
-    throw new Error('Map style does not contain any layer with fill-extrusion type.');
-};
-new RoutingAB();
-</script>
-
+  </script>
 </body>
 </html>
