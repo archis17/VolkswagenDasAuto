@@ -1,0 +1,54 @@
+id,type,severity,lat,lon,reported_on,notes
+A-001,pothole,4,18.602,73.730,2025-11-08T09:15:00+05:30,"Large pothole near service lane, causes swerving."
+A-002,pothole,3,18.600,73.732,2025-11-08T09:20:00+05:30,Series of small potholes across left lane.
+A-003,debris,2,18.598,73.734,2025-11-07T18:05:00+05:30,Loose construction gravel on shoulder.
+A-004,road_construction,5,18.596,73.736,2025-11-08T08:00:00+05:30,Partial carriageway closed for digging; single-lane traffic.
+A-005,pothole,4,18.594,73.738,2025-11-08T08:40:00+05:30,"Deep pothole near bus stop, water fills when it rains."
+A-006,waterlogging,3,18.592,73.740,2025-11-06T07:30:00+05:30,Low-lying stretch; shallow flooding after rains.
+A-007,pothole,3,18.590,73.742,2025-11-07T12:50:00+05:30,Cluster of uneven patches across both lanes.
+A-008,debris,2,18.588,73.744,2025-11-07T13:10:00+05:30,Discarded metal rods near divider.
+A-009,pothole,5,18.586,73.746,2025-11-08T06:45:00+05:30,Very deep pothole; vehicle undercarriage risk.
+A-010,fallen_tree,3,18.584,73.748,2025-11-07T20:00:00+05:30,Small tree branch partially blocking shoulder.
+A-011,pothole,2,18.582,73.750,2025-11-06T16:00:00+05:30,Patching required—temporary fix in place.
+A-012,road_construction,4,18.580,73.752,2025-11-08T07:00:00+05:30,Road widening; intermittent traffic stoppages.
+A-013,pothole,3,18.599,73.732,2025-11-08T10:15:00+05:30,Hinjawadi Phase 1 - Multiple potholes on main road.
+A-014,debris,2,18.598,73.733,2025-11-07T19:20:00+05:30,Hinjawadi - Construction material scattered on road.
+A-015,waterlogging,4,18.597,73.734,2025-11-06T08:00:00+05:30,Hinjawadi Phase 2 - Severe waterlogging after rain.
+A-016,pothole,4,18.596,73.735,2025-11-08T09:30:00+05:30,Hinjawadi - Deep pothole near IT park entrance.
+A-017,road_construction,3,18.595,73.736,2025-11-08T07:15:00+05:30,Hinjawadi - Road repair work in progress.
+A-018,debris,1,18.594,73.737,2025-11-07T16:45:00+05:30,Hinjawadi Phase 1 - Minor debris on service road.
+A-019,pothole,2,18.593,73.738,2025-11-06T14:20:00+05:30,Hinjawadi - Small pothole near residential area.
+A-020,fallen_tree,2,18.592,73.739,2025-11-07T21:30:00+05:30,Hinjawadi - Tree branch blocking one lane.
+A-021,pothole,3,18.595,73.740,2025-11-08T11:00:00+05:30,Hinjawadi Phase 2 - Pothole cluster on main thoroughfare.
+A-022,waterlogging,3,18.594,73.741,2025-11-06T09:15:00+05:30,Hinjawadi - Water accumulation near junction.
+A-023,road_construction,4,18.593,73.742,2025-11-08T08:30:00+05:30,Hinjawadi - Major construction blocking two lanes.
+A-024,debris,2,18.592,73.743,2025-11-07T17:00:00+05:30,Hinjawadi Phase 1 - Metal scraps on road shoulder.
+A-025,pothole,4,18.591,73.744,2025-11-08T10:45:00+05:30,Hinjawadi - Large pothole causing traffic slowdown.
+A-026,pothole,3,18.596,73.737,2025-11-09T10:00:00+05:30,Near Embassy TechZone entrance - medium pothole.
+A-027,debris,2,18.597,73.738,2025-11-09T11:30:00+05:30,Embassy TechZone - Construction debris on side road.
+A-028,road_construction,4,18.598,73.739,2025-11-09T09:00:00+05:30,Marunji Road junction - Road work in progress.
+A-029,waterlogging,3,18.599,73.740,2025-11-08T14:00:00+05:30,South of Embassy TechZone - Water accumulation.
+A-030,pothole,5,18.600,73.741,2025-11-09T08:15:00+05:30,North of Embassy TechZone - Deep pothole on main road.
+A-031,fallen_tree,3,18.594,73.740,2025-11-08T22:00:00+05:30,Marunji Road - Small branch partially blocking lane.
+A-032,pothole,2,18.593,73.739,2025-11-09T13:00:00+05:30,Embassy TechZone area - Minor surface damage.
+A-033,debris,1,18.592,73.738,2025-11-09T14:30:00+05:30,Marunji Road - Leaves and small stones on pavement.
+A-034,pothole,4,18.595,73.737,2025-11-09T15:00:00+05:30,Embassy TechZone - Large pothole near parking area.
+A-035,road_construction,3,18.596,73.738,2025-11-09T16:00:00+05:30,Marunji Road - Temporary roadworks near TechZone.
+A-036,pothole,4,18.597,73.739,2025-11-09T17:00:00+05:30,Marked area - Deep pothole on Marunji Road.
+A-037,debris,3,18.598,73.740,2025-11-09T18:00:00+05:30,Marked area - Construction debris near Embassy TechZone.
+A-038,road_construction,5,18.599,73.741,2025-11-09T19:00:00+05:30,Marked area - Major road construction blocking traffic.
+A-039,waterlogging,4,18.600,73.742,2025-11-09T20:00:00+05:30,Marked area - Severe waterlogging in enclosed region.
+A-040,pothole,3,18.601,73.743,2025-11-09T21:00:00+05:30,Marked area - Multiple potholes on main route.
+A-041,fallen_tree,3,18.602,73.744,2025-11-09T22:00:00+05:30,Marked area - Fallen tree branch blocking lane.
+A-042,debris,2,18.603,73.745,2025-11-09T23:00:00+05:30,Marked area - Scattered debris on road.
+A-043,pothole,5,18.604,73.746,2025-11-10T08:00:00+05:30,Marked area - Very deep pothole requiring immediate attention.
+A-044,road_construction,4,18.605,73.747,2025-11-10T09:00:00+05:30,Marked area - Ongoing utility work causing delays.
+A-045,pothole,4,18.597,73.730,2025-11-10T10:00:00+05:30,Left of marked area - Deep pothole on side road.
+A-046,debris,2,18.598,73.731,2025-11-10T11:00:00+05:30,Left of marked area - Construction material scattered.
+A-047,road_construction,4,18.599,73.732,2025-11-10T12:00:00+05:30,Left of marked area - Road widening work in progress.
+A-048,waterlogging,3,18.600,73.733,2025-11-10T13:00:00+05:30,Left of marked area - Water accumulation after rain.
+A-049,pothole,3,18.601,73.734,2025-11-10T14:00:00+05:30,Left of marked area - Medium pothole cluster.
+A-050,fallen_tree,2,18.602,73.735,2025-11-10T15:00:00+05:30,Left of marked area - Tree branch on road shoulder.
+A-051,debris,2,18.603,73.736,2025-11-10T16:00:00+05:30,Left of marked area - Debris on service lane.
+A-052,pothole,5,18.604,73.737,2025-11-10T17:00:00+05:30,Left of marked area - Very deep pothole requiring repair.
+A-053,road_construction,3,18.605,73.738,2025-11-10T18:00:00+05:30,Left of marked area - Minor construction activity.

@@ -8,7 +8,7 @@ from pathlib import Path
 class VideoFileManager:
     def __init__(self):
         self.video_path = None
-        self.frame_queue = queue.Queue(maxsize=2)  # Increased buffer for smoother playback
+        self.frame_queue = queue.Queue(maxsize=5)  # Larger buffer for smoother playback
         self.running = False
         self.thread = None
         self.cap = None
@@ -18,6 +18,7 @@ class VideoFileManager:
         self.uploads_dir = Path(__file__).parent / "uploads"
         self.uploads_dir.mkdir(exist_ok=True)
         self.last_frame_time = 0
+        self.frame_times = []  # Track frame timing for smooth playback
     
     def load_video(self, video_path: str):
         """Load a video file for processing"""
@@ -55,44 +56,61 @@ class VideoFileManager:
                 break
     
     def _process_frames(self):
-        """Process frames from video file"""
+        """Process frames from video file - optimized for smooth native playback"""
         self.cap = cv2.VideoCapture(self.video_path)
         if not self.cap.isOpened():
             print(f"Error: Could not open video file {self.video_path}")
             self.running = False
             return
         
-        # Get video properties
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30
+        # Get video properties - use native FPS for smooth playback
+        original_fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+        self.fps = original_fps  # Use native FPS, don't cap it
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        # Optimize video reading - don't force resize, let it use native resolution
-        # Resizing will be handled in websocket_server if needed
+        print(f"📹 Video loaded: {self.total_frames} frames @ {self.fps:.2f} FPS")
         
-        # Calculate frame timing
+        # Optimize video capture settings for smooth playback
+        try:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # Small buffer for smooth playback
+        except:
+            pass
+        
+        # Calculate frame timing - use native video FPS
         frame_delay = 1.0 / self.fps if self.fps > 0 else 0.033
         self.last_frame_time = time.time()
+        self.frame_times = []
         
         while self.running:
             frame_start = time.time()
+            
+            # Read frame at native rate - no frame skipping
             ret, frame = self.cap.read()
             if not ret:
                 # End of video or error - loop back to start
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 self.current_frame = 0
                 self.last_frame_time = time.time()
+                self.frame_times = []  # Reset timing
                 continue
             
             self.current_frame += 1
             
-            # Efficiently manage queue - keep only latest frames
-            while self.frame_queue.qsize() >= 2:
-                try:
-                    self.frame_queue.get_nowait()
-                except queue.Empty:
-                    break
+            # Pre-resize frame for faster processing (only if very large)
+            if frame.shape[1] > 1920:
+                ratio = 1920 / float(frame.shape[1])
+                new_size = (int(frame.shape[1] * ratio), int(frame.shape[0] * ratio))
+                frame = cv2.resize(frame, new_size, interpolation=cv2.INTER_LINEAR)
             
-            # Non-blocking put for better performance
+            # Manage queue - keep a small buffer for smooth playback (don't drop frames aggressively)
+            # Only drop if queue is getting too full
+            if self.frame_queue.qsize() >= 4:
+                try:
+                    self.frame_queue.get_nowait()  # Drop oldest frame only if queue is full
+                except queue.Empty:
+                    pass
+            
+            # Non-blocking put - queue frames for smooth playback
             try:
                 self.frame_queue.put_nowait(frame)
             except queue.Full:
@@ -103,10 +121,17 @@ class VideoFileManager:
                 except queue.Empty:
                     pass
             
-            # Precise timing control - only sleep if we're ahead of schedule
+            # Precise timing control - maintain native video FPS
             elapsed = time.time() - frame_start
             sleep_time = frame_delay - elapsed
-            if sleep_time > 0.001:  # Only sleep if significant time remaining
+            
+            # Track frame timing for smooth playback
+            self.frame_times.append(time.time())
+            if len(self.frame_times) > 30:
+                self.frame_times.pop(0)
+            
+            # Sleep to maintain native FPS (smooth playback)
+            if sleep_time > 0.0001:  # Only sleep if there's meaningful time left
                 time.sleep(sleep_time)
             # If reading is slow, continue immediately (maintains real-time playback)
     
