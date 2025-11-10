@@ -12,7 +12,7 @@ To create the required PWA icons, you can use any image editor or online tool:
 - Or use any image editor (GIMP, Photoshop, etc.)
 
 ## Design Suggestions:
-- Use the Hazard Eye logo or a road safety themed icon
+- Use the RoadGuard AI logo or a road safety themed icon
 - Use colors: #3498db (blue) and #2ecc71 (green)
 - Ensure icons are square and have transparent or solid background
 - Make sure icons are clear and recognizable at small sizes

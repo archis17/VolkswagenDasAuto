@@ -1,10 +1,10 @@
-# 🚧 Hazard_Eye – Real-Time Road Hazard Detection System
+# 🚧 RoadGuard AI – Real-Time Road Hazard Detection System
 
-Hazard_Eye is a smart road safety system that detects real-time hazards such as potholes, speed bumps, and animals using computer vision. It integrates AI with modern web technologies to alert users and auto-report danger zones to local authorities. Designed for smart cities and intelligent transport systems, this project leverages FastAPI, React.js, and YOLOv12.
+RoadGuard AI is a smart road safety system that detects real-time hazards such as potholes, speed bumps, and animals using computer vision. It integrates AI with modern web technologies to alert users and auto-report danger zones to local authorities. Designed for smart cities and intelligent transport systems, this project leverages FastAPI, React.js, and YOLOv12.
 
 ---
 
-![Hazard_Eye Banner](assets/banner.png)
+![RoadGuard AI Banner](assets/banner.png)
 
 ---
 
@@ -34,7 +34,7 @@ Hazard_Eye is a smart road safety system that detects real-time hazards such as 
 ## 📁 Project Structure
 
 ```bash
-Hazard_Eye/
+RoadGuard_AI/
 ├── backend/
 │   ├── main.py              # FastAPI server logic
 │   ├── detect.py            # Object detection integration

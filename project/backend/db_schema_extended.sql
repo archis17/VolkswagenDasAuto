@@ -1,4 +1,4 @@
--- Extended Database Schema for Hazard Eye
+-- Extended Database Schema for RoadGuard AI
 -- Includes MQTT, Geofencing, and Analytics support
 
 -- PostGIS Extension (must be enabled first)

@@ -121,7 +121,7 @@ export default function PWAInstallPrompt() {
                 </div>
                 <div className="flex-1">
                   <h3 className="text-xl font-bold text-white mb-1">
-                    Install Hazard Eye
+                    Install RoadGuard AI
                   </h3>
                   <p className="text-sm text-gray-300">
                     Get quick access and a better experience

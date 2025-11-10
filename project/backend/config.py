@@ -50,7 +50,7 @@ MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "localhost")
 MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", None)
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", None)
-MQTT_CLIENT_ID = os.getenv("MQTT_CLIENT_ID", "hazard-eye-backend")
+MQTT_CLIENT_ID = os.getenv("MQTT_CLIENT_ID", "roadguard-ai-backend")
 MQTT_ENABLED = os.getenv("MQTT_ENABLED", "false").lower() == "true"
 
 # Geofence Configuration

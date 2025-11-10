@@ -25,8 +25,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
-        name: 'Hazard Eye - Road Safety Detection',
-        short_name: 'Hazard Eye',
+        name: 'RoadGuard AI - Road Safety Detection',
+        short_name: 'RoadGuard AI',
         description: 'AI-powered road hazard detection system making roads safer for everyone',
         theme_color: '#3498db',
         background_color: '#1a1a2e',

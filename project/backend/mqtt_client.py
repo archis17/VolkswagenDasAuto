@@ -1,5 +1,5 @@
 """
-MQTT Client Module for Hazard Eye
+MQTT Client Module for RoadGuard AI
 Handles MQTT publishing for hazard detections and IoT integration
 """
 import asyncio
@@ -147,13 +147,13 @@ class MQTTClient:
             return False
         
         try:
-            # Build topic: hazard-eye/detections/{hazard_type}/{lat}/{lng}
+            # Build topic: roadguard-ai/detections/{hazard_type}/{lat}/{lng}
             if location and 'lat' in location and 'lng' in location:
                 lat = round(location['lat'], 6)
                 lng = round(location['lng'], 6)
-                topic = f"hazard-eye/detections/{hazard_type}/{lat}/{lng}"
+                topic = f"roadguard-ai/detections/{hazard_type}/{lat}/{lng}"
             else:
-                topic = f"hazard-eye/detections/{hazard_type}/unknown"
+                topic = f"roadguard-ai/detections/{hazard_type}/unknown"
             
             # Build payload
             payload = {
@@ -162,7 +162,7 @@ class MQTTClient:
                 "location": location,
                 "confidence": confidence,
                 "timestamp": timestamp.isoformat(),
-                "source": "hazard-eye-backend"
+                "source": "roadguard-ai-backend"
             }
             
             payload_json = json.dumps(payload)
@@ -217,7 +217,7 @@ class MQTTClient:
             return False
         
         try:
-            topic = f"hazard-eye/geofence/{zone_id}/hazards"
+            topic = f"roadguard-ai/geofence/{zone_id}/hazards"
             
             payload = {
                 "detection_id": detection_id,

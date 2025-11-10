@@ -96,7 +96,7 @@ MQTT_BROKER_HOST=your-broker.hivemq.cloud
 MQTT_BROKER_PORT=8883
 MQTT_USERNAME=your-username
 MQTT_PASSWORD=your-password
-MQTT_CLIENT_ID=hazard-eye-backend
+MQTT_CLIENT_ID=roadguard-ai-backend
 
 # Geofence
 GEOFENCE_DEFAULT_RADIUS=5000
@@ -148,7 +148,7 @@ GEOFENCE_DEFAULT_RADIUS=5000
 | `MQTT_BROKER_PORT` | `1883` | MQTT broker port |
 | `MQTT_USERNAME` | - | MQTT username |
 | `MQTT_PASSWORD` | - | MQTT password |
-| `MQTT_CLIENT_ID` | `hazard-eye-backend` | MQTT client ID |
+| `MQTT_CLIENT_ID` | `roadguard-ai-backend` | MQTT client ID |
 | `GEOFENCE_DEFAULT_RADIUS` | `5000` | Default geofence radius (meters) |
 
 ## Deployment Limitations & Considerations

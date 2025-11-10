@@ -130,7 +130,7 @@ function Navigation() {
         >
           <div className="flex items-center gap-2">
             <NavigationIcon className={`${scrolled ? 'text-[#3498db]' : 'text-white'}`} />
-            <span className={`bg-gradient-to-r from-[#3498db] to-[#2c3e50] bg-clip-text text-transparent`}>Hazard Eye</span>
+            <span className={`bg-gradient-to-r from-[#3498db] to-[#2c3e50] bg-clip-text text-transparent`}>RoadGuard AI</span>
           </div>
         </motion.div>
         
@@ -681,7 +681,7 @@ function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
           <div>
             <h3 className="text-2xl font-bold bg-gradient-to-r from-[#3498db] to-[#2ecc71] bg-clip-text text-transparent mb-4">
-              Hazard Eye
+              RoadGuard AI
             </h3>
             <p className="text-gray-400 leading-relaxed">
               AI-powered road hazard detection system making roads safer for everyone through advanced technology.
@@ -727,7 +727,7 @@ function Footer() {
         </div>
         
         <div className="border-t border-white/10 pt-8 text-center text-gray-400">
-          <p>© 2025 Hazard Eye | Powered by YOLO & Advanced AI | Making Roads Safer</p>
+          <p>© 2025 RoadGuard AI | Powered by YOLO & Advanced AI | Making Roads Safer</p>
         </div>
       </div>
     </footer>

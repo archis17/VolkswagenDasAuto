@@ -1,5 +1,5 @@
 """
-Geofence Service Module for Hazard Eye
+Geofence Service Module for RoadGuard AI
 Handles geofence zone management and location-based broadcasting
 """
 import logging
@@ -229,7 +229,7 @@ class GeofenceService:
                         await self._log_broadcast(
                             detection_id=detection_id,
                             zone_id=zone_id,
-                            topic=f"hazard-eye/geofence/{zone_id}/hazards",
+                            topic=f"roadguard-ai/geofence/{zone_id}/hazards",
                             devices_notified=len(subscriptions)
                         )
                         broadcast_count += 1
