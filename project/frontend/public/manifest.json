@@ -1,6 +1,6 @@
 {
-  "name": "Hazard Eye - Road Safety Detection",
-  "short_name": "Hazard Eye",
+  "name": "RoadGuard AI - Road Safety Detection",
+  "short_name": "RoadGuard AI",
   "description": "AI-powered road hazard detection system making roads safer for everyone",
   "start_url": "/",
   "display": "standalone",

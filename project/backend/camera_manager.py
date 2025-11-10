@@ -6,12 +6,12 @@ import time
 class CameraManager:
     def __init__(self):
         self.active_camera = None
-        self.frame_queue = queue.Queue(maxsize=2)  # Increased buffer for smoother capture
+        self.frame_queue = queue.Queue(maxsize=1)  # Reduced buffer for lower latency
         self.running = False
         self.thread = None
         self.cap = None
         self.camera_available = False
-        self.target_fps = 30  # Increased FPS for smoother video
+        self.target_fps = 60  # Target 60 FPS for smoother video
         self.last_frame_time = 0
         
     def _find_available_camera(self):
@@ -85,9 +85,9 @@ class CameraManager:
                     except Exception:
                         pass
                     
-                    # Set resolution (can be adjusted based on camera capability)
-                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                    # Set resolution - reduced for smoother capture
+                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
+                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
                     
                     # Set FPS if supported
                     try:
@@ -120,14 +120,14 @@ class CameraManager:
                 
                 reconnect_attempts = 0
                 
-                # Efficiently manage queue - keep only latest frames
-                while self.frame_queue.qsize() >= 2:
+                # Efficiently manage queue - keep only latest frame (lowest latency)
+                while self.frame_queue.qsize() >= 1:
                     try:
                         self.frame_queue.get_nowait()
                     except queue.Empty:
                         break
                 
-                # Non-blocking put - drop frame if queue is full (prevents lag)
+                # Non-blocking put - always keep only the latest frame
                 try:
                     self.frame_queue.put_nowait(frame)
                 except queue.Full:

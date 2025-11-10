@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import time
 import json
+import queue
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Dict
@@ -35,16 +36,48 @@ import mode_state
 # Thread pool for CPU-intensive operations
 executor = ThreadPoolExecutor(max_workers=2)
 
-# WebSocket configuration - optimized for higher FPS
-TARGET_FPS = 30  # Increased for smoother video
-FRAME_INTERVAL = 1.0 / TARGET_FPS  # ~0.033 seconds
-JPEG_QUALITY = 70  # Balanced quality and size for faster encoding
-MAX_QUEUE_SIZE = 2  # Maximum frames to queue before dropping
-FRAME_SKIP_THRESHOLD = 0.05  # Skip frame if encoding takes longer than this (reduced for responsiveness)
+# WebSocket configuration - optimized for higher FPS and smoother playback
+TARGET_FPS = 60  # Target 60 FPS for smooth video
+FRAME_INTERVAL = 1.0 / TARGET_FPS  # ~0.0167 seconds
+JPEG_QUALITY = 60  # Reduced for faster encoding and smoother streaming
+MAX_QUEUE_SIZE = 1  # Reduced queue for lower latency
+FRAME_SKIP_THRESHOLD = 0.05  # Skip frame if encoding takes longer than this
 
 def get_current_mode():
     """Get the current detection mode"""
     return mode_state.detection_mode
+
+# Global cache variables for detection results
+cached_results = []
+cached_driver_lane_hazard_count = 0
+cached_hazard_distances = []
+cached_mode = "live"
+cached_vis_frame = None
+
+async def _handle_detection_result(detection_task, frame_index, current_mode, current_gps_location):
+    """Handle detection result asynchronously"""
+    global cached_results, cached_driver_lane_hazard_count, cached_hazard_distances, cached_mode, cached_vis_frame
+    try:
+        results, driver_lane_hazard_count, vis_frame, hazard_distances = await detection_task
+        # Update cached results
+        cached_results = results
+        cached_driver_lane_hazard_count = driver_lane_hazard_count
+        cached_hazard_distances = hazard_distances
+        cached_mode = current_mode
+        cached_vis_frame = vis_frame.copy() if vis_frame is not None else None
+        
+        # Store detections in database and publish to MQTT (non-blocking)
+        if results:  # Only store if we have detections
+            asyncio.create_task(store_and_publish_detections(
+                results=results,
+                driver_lane_hazard_count=driver_lane_hazard_count,
+                hazard_distances=hazard_distances,
+                gps_location=current_gps_location,
+                frame_number=frame_index,
+                current_mode=current_mode
+            ))
+    except Exception as e:
+        print(f"Error in detection handling: {e}")
 
 def encode_frame_sync(frame, quality=JPEG_QUALITY):
     """Synchronous frame encoding (runs in thread pool)"""
@@ -59,9 +92,10 @@ def encode_frame_sync(frame, quality=JPEG_QUALITY):
         return None
 
 async def websocket_endpoint(websocket: WebSocket):
+    global cached_results, cached_driver_lane_hazard_count, cached_hazard_distances, cached_mode, cached_vis_frame
     await websocket.accept()
-    # Optimized throttle settings for higher FPS
-    frame_interval_s = 0.033  # Target ~30 FPS
+    # Dynamic throttle settings - adapt to video FPS
+    frame_interval_s = 0.0167  # Default ~60 FPS, will adapt to video FPS
     json_interval_s = 0.20   # 5 Hz for JSON telemetry
     ping_interval_s = 20.0   # keepalive ping
 
@@ -69,14 +103,11 @@ async def websocket_endpoint(websocket: WebSocket):
     last_json_sent = 0.0
     last_ping_sent = 0.0
 
-    # Optimized detection interval - run detection every 3 frames for better FPS
-    detect_interval = 3  # Reduced detection frequency for higher FPS
+    # Optimized detection interval - run detection every 15 frames for smoother streaming
+    detect_interval = 15  # Detection frequency
     frame_index = 0
-    cached_results = []
-    cached_driver_lane_hazard_count = 0
-    cached_hazard_distances = []
-    cached_mode = "live"
-    cached_vis_frame = None  # Cache the last processed frame
+    video_fps = None  # Will be set based on video file
+    # Use global cache variables
     
     # GPS location tracking (updated from client messages)
     current_gps_location: Optional[Dict[str, float]] = None
@@ -122,10 +153,24 @@ async def websocket_endpoint(websocket: WebSocket):
             # Initialize frame to None at start of each loop
             frame = None
 
-            # Get the latest frame based on current mode, dropping stale frames
+            # Get the latest frame based on current mode
             if current_mode == "video":
-                # Get the most recent frame from video queue (drop older ones)
-                while not video_file_manager.frame_queue.empty():
+                # For video mode, adapt frame interval to video FPS for smooth playback
+                if video_fps is None:
+                    video_fps = video_file_manager.fps
+                    if video_fps > 0:
+                        frame_interval_s = 1.0 / video_fps
+                        print(f"🎬 Video FPS detected: {video_fps:.2f}, frame interval: {frame_interval_s:.4f}s")
+                
+                # Get frame from queue (don't drop all - allow some buffering for smooth playback)
+                if not video_file_manager.frame_queue.empty():
+                    # Get the latest frame, but keep some in queue for smooth playback
+                    frames_to_drop = max(0, video_file_manager.frame_queue.qsize() - 2)
+                    for _ in range(frames_to_drop):
+                        try:
+                            video_file_manager.frame_queue.get_nowait()
+                        except queue.Empty:
+                            break
                     frame = video_file_manager.frame_queue.get()
             else:
                 # Get the most recent frame from camera queue (drop older ones)
@@ -142,53 +187,61 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Decide whether to run detection on this frame
                 run_detection = (frame_index % detect_interval) == 0
 
+                # Start detection in background if needed (non-blocking)
                 if run_detection:
-                    # Run detection and cache results
-                    results, driver_lane_hazard_count, vis_frame, hazard_distances = process_frame_with_models(frame)
-                    cached_results = results
-                    cached_driver_lane_hazard_count = driver_lane_hazard_count
-                    cached_hazard_distances = hazard_distances
-                    cached_mode = current_mode
-                    cached_vis_frame = vis_frame.copy() if vis_frame is not None else None
-                    
-                    # Store detections in database and publish to MQTT (non-blocking)
-                    if results:  # Only store if we have detections
-                        asyncio.create_task(store_and_publish_detections(
-                            results=results,
-                            driver_lane_hazard_count=driver_lane_hazard_count,
-                            hazard_distances=hazard_distances,
-                            gps_location=current_gps_location,
-                            frame_number=frame_index,
-                            current_mode=current_mode
-                        ))
-                else:
-                    # Use cached results and frame for faster processing
-                    vis_frame = cached_vis_frame if cached_vis_frame is not None else frame
-                    results = cached_results
-                    driver_lane_hazard_count = cached_driver_lane_hazard_count
-                    hazard_distances = cached_hazard_distances
-                    current_mode = cached_mode
+                    # Run detection in executor without blocking frame sending
+                    loop = asyncio.get_event_loop()
+                    detection_task = loop.run_in_executor(
+                        executor, process_frame_with_models, frame
+                    )
+                    # Don't await - let it run in background
+                    asyncio.create_task(_handle_detection_result(
+                        detection_task, frame_index, current_mode, current_gps_location
+                    ))
+
+                # Use cached frame/results for immediate sending (don't wait for detection)
+                vis_frame = cached_vis_frame if cached_vis_frame is not None else frame
+                results = cached_results if cached_results else []
+                driver_lane_hazard_count = cached_driver_lane_hazard_count
+                hazard_distances = cached_hazard_distances if cached_hazard_distances else []
                 
                 try:
-                    # Optimized frame processing - only resize if needed
-                    max_width = 960  # Increased for better quality while maintaining performance
+                    # Ensure we have a valid frame
+                    if vis_frame is None:
+                        vis_frame = frame
+                    
+                    if vis_frame is None or len(vis_frame.shape) < 2:
+                        continue  # Skip if no valid frame
+                    
+                    # Optimized frame processing - resize for faster encoding/transmission
+                    # Use higher resolution for video mode to maintain quality
+                    max_width = 1280 if current_mode == "video" else 960
                     if vis_frame.shape[1] > max_width:
                         ratio = max_width / float(vis_frame.shape[1])
                         new_size = (int(vis_frame.shape[1] * ratio), int(vis_frame.shape[0] * ratio))
-                        vis_frame = cv2.resize(vis_frame, new_size, interpolation=cv2.INTER_LINEAR)  # Faster than INTER_AREA
+                        # Use INTER_LINEAR for better quality in video mode
+                        interpolation = cv2.INTER_LINEAR if current_mode == "video" else cv2.INTER_NEAREST
+                        vis_frame = cv2.resize(vis_frame, new_size, interpolation=interpolation)
 
-                    # JPEG compress with optimized quality
-                    jpeg_bytes = encode_jpeg_bgr(vis_frame, quality=JPEG_QUALITY)
+                    # JPEG compress with optimized quality (using TurboJPEG if available)
+                    # Run encoding in executor to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    jpeg_bytes = await loop.run_in_executor(
+                        executor, encode_jpeg_bgr, vis_frame, JPEG_QUALITY
+                    )
+                    
                     send_start = asyncio.get_event_loop().time()
                     await websocket.send_bytes(jpeg_bytes)
                     last_frame_sent = now
                     
-                    # Adaptive frame pacing based on send time - more aggressive optimization
-                    send_time = asyncio.get_event_loop().time() - send_start
-                    if send_time > 0.05:  # Reduced threshold for faster adaptation
-                        frame_interval_s = min(0.10, frame_interval_s + 0.01)  # Faster backoff
-                    elif send_time < 0.015:  # If very fast, can increase FPS
-                        frame_interval_s = max(0.02, frame_interval_s - 0.002)  # More aggressive increase
+                    # Adaptive frame pacing - only adjust for live mode, keep video at native FPS
+                    if current_mode != "video":
+                        send_time = asyncio.get_event_loop().time() - send_start
+                        if send_time > 0.025:  # If sending takes too long, reduce FPS
+                            frame_interval_s = min(0.05, frame_interval_s + 0.003)  # Increase interval (lower FPS)
+                        elif send_time < 0.008:  # If very fast, can increase FPS
+                            frame_interval_s = max(0.014, frame_interval_s - 0.0005)  # Decrease interval (higher FPS)
+                    # For video mode, keep frame_interval_s at native video FPS (don't adjust)
                 except Exception:
                     # If sending fails (client closed/slow), break the loop to close socket
                     break
@@ -222,10 +275,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 except Exception:
                     break
 
-            # Reduced sleep for lower latency - only yield if no frame to process
+            # Minimal sleep for lower latency - optimized for smooth streaming
             if frame is None:
-                await asyncio.sleep(0.005)  # Reduced sleep time for faster response
-            # If frame exists, continue immediately without sleep
+                await asyncio.sleep(0.002)  # Small sleep when no frame
+            # If we have a frame, continue immediately (no sleep for maximum throughput)
 
     except WebSocketDisconnect:
         print(f"Client disconnected")

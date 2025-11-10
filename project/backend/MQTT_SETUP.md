@@ -15,7 +15,7 @@ MQTT is **disabled by default**. The warning message indicates MQTT is not enabl
 MQTT_ENABLED=true
 MQTT_BROKER_HOST=localhost
 MQTT_BROKER_PORT=1883
-MQTT_CLIENT_ID=hazard-eye-backend
+MQTT_CLIENT_ID=roadguard-ai-backend
 
 # Optional: If your MQTT broker requires authentication
 MQTT_USERNAME=your_username
@@ -40,7 +40,7 @@ MQTT_BROKER_HOST=your-broker.hivemq.cloud
 MQTT_BROKER_PORT=8883
 MQTT_USERNAME=your_username
 MQTT_PASSWORD=your_password
-MQTT_CLIENT_ID=hazard-eye-backend
+MQTT_CLIENT_ID=roadguard-ai-backend
 ```
 
 ### Option 3: Local MQTT Broker (For Testing)
@@ -72,9 +72,9 @@ mosquitto -v
 
 When enabled, the system publishes to these topics:
 
-- **Detections**: `hazard-eye/detections/{hazard_type}/{lat}/{lng}`
-- **Geofence Broadcasts**: `hazard-eye/geofence/{zone_id}/hazards`
-- **Device Subscriptions**: `hazard-eye/devices/{device_id}/hazards`
+- **Detections**: `roadguard-ai/detections/{hazard_type}/{lat}/{lng}`
+- **Geofence Broadcasts**: `roadguard-ai/geofence/{zone_id}/hazards`
+- **Device Subscriptions**: `roadguard-ai/devices/{device_id}/hazards`
 
 ## Testing MQTT Connection
 
@@ -85,7 +85,7 @@ When enabled, the system publishes to these topics:
 
 2. **Subscribe to topics** (using mosquitto client):
    ```bash
-   mosquitto_sub -h localhost -p 1883 -t "hazard-eye/+/+"
+   mosquitto_sub -h localhost -p 1883 -t "roadguard-ai/+/+"
    ```
 
 ## Current Behavior

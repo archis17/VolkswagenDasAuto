@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import apiClient from '../utils/axios';
+import axios from 'axios';
 import { motion } from 'framer-motion';
 import { ArrowLeft, MapPin, RotateCw, AlertTriangle, Navigation, X, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { calculateHeadingFromMovement } from '../services/routeHazardProximityService';
 
 export default function PotholeMap() {
   const mapRef = useRef(null);
@@ -23,15 +25,165 @@ export default function PotholeMap() {
   const [searchingStart, setSearchingStart] = useState(false);
   const [searchingEnd, setSearchingEnd] = useState(false);
   const [showRoutePanel, setShowRoutePanel] = useState(true);
+  const [startSuggestions, setStartSuggestions] = useState([]);
+  const [endSuggestions, setEndSuggestions] = useState([]);
+  const [showStartSuggestions, setShowStartSuggestions] = useState(false);
+  const [showEndSuggestions, setShowEndSuggestions] = useState(false);
+  const startInputRef = useRef(null);
+  const endInputRef = useRef(null);
+  const startSuggestionsRef = useRef(null);
+  const endSuggestionsRef = useRef(null);
+  const debounceTimerRef = useRef({ start: null, end: null });
   const routeMarkersRef = useRef([]);
   const alternativeRoutesRef = useRef([]); // Store alternative route layers
+  const [routeComparison, setRouteComparison] = useState(null);
+  const [showRouteComparison, setShowRouteComparison] = useState(true); // Default to true - show markers by default
+  const [routeComparisonLoading, setRouteComparisonLoading] = useState(true);
+  const [routeComparisonError, setRouteComparisonError] = useState(null);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [heading, setHeading] = useState(null);
+  const routeHazardMarkersRef = useRef([]); // Store route hazard markers
+  const currentLocationMarkerRef = useRef(null); // Store current location marker
+  const previousLocationRef = useRef(null);
   
+  // Hardcoded route data as fallback (from CSV files) - Updated to align with route paths
+  const fallbackRouteData = {
+    route_a: {
+      route_name: 'Route A',
+      hazards: [
+        {id: 'A-001', type: 'pothole', severity: 4, lat: 18.602, lon: 73.730, reported_on: '2025-11-08T09:15:00+05:30', notes: 'Large pothole near service lane, causes swerving.'},
+        {id: 'A-002', type: 'pothole', severity: 3, lat: 18.600, lon: 73.732, reported_on: '2025-11-08T09:20:00+05:30', notes: 'Series of small potholes across left lane.'},
+        {id: 'A-003', type: 'debris', severity: 2, lat: 18.598, lon: 73.734, reported_on: '2025-11-07T18:05:00+05:30', notes: 'Loose construction gravel on shoulder.'},
+        {id: 'A-004', type: 'road_construction', severity: 5, lat: 18.596, lon: 73.736, reported_on: '2025-11-08T08:00:00+05:30', notes: 'Partial carriageway closed for digging; single-lane traffic.'},
+        {id: 'A-005', type: 'pothole', severity: 4, lat: 18.594, lon: 73.738, reported_on: '2025-11-08T08:40:00+05:30', notes: 'Deep pothole near bus stop, water fills when it rains.'},
+        {id: 'A-006', type: 'waterlogging', severity: 3, lat: 18.592, lon: 73.740, reported_on: '2025-11-06T07:30:00+05:30', notes: 'Low-lying stretch; shallow flooding after rains.'},
+        {id: 'A-007', type: 'pothole', severity: 3, lat: 18.590, lon: 73.742, reported_on: '2025-11-07T12:50:00+05:30', notes: 'Cluster of uneven patches across both lanes.'},
+        {id: 'A-008', type: 'debris', severity: 2, lat: 18.588, lon: 73.744, reported_on: '2025-11-07T13:10:00+05:30', notes: 'Discarded metal rods near divider.'},
+        {id: 'A-009', type: 'pothole', severity: 5, lat: 18.586, lon: 73.746, reported_on: '2025-11-08T06:45:00+05:30', notes: 'Very deep pothole; vehicle undercarriage risk.'},
+        {id: 'A-010', type: 'fallen_tree', severity: 3, lat: 18.584, lon: 73.748, reported_on: '2025-11-07T20:00:00+05:30', notes: 'Small tree branch partially blocking shoulder.'},
+        {id: 'A-011', type: 'pothole', severity: 2, lat: 18.582, lon: 73.750, reported_on: '2025-11-06T16:00:00+05:30', notes: 'Patching required—temporary fix in place.'},
+        {id: 'A-012', type: 'road_construction', severity: 4, lat: 18.580, lon: 73.752, reported_on: '2025-11-08T07:00:00+05:30', notes: 'Road widening; intermittent traffic stoppages.'},
+        {id: 'A-013', type: 'pothole', severity: 3, lat: 18.599, lon: 73.732, reported_on: '2025-11-08T10:15:00+05:30', notes: 'Hinjawadi Phase 1 - Multiple potholes on main road.'},
+        {id: 'A-014', type: 'debris', severity: 2, lat: 18.598, lon: 73.733, reported_on: '2025-11-07T19:20:00+05:30', notes: 'Hinjawadi - Construction material scattered on road.'},
+        {id: 'A-015', type: 'waterlogging', severity: 4, lat: 18.597, lon: 73.734, reported_on: '2025-11-06T08:00:00+05:30', notes: 'Hinjawadi Phase 2 - Severe waterlogging after rain.'},
+        {id: 'A-016', type: 'pothole', severity: 4, lat: 18.596, lon: 73.735, reported_on: '2025-11-08T09:30:00+05:30', notes: 'Hinjawadi - Deep pothole near IT park entrance.'},
+        {id: 'A-017', type: 'road_construction', severity: 3, lat: 18.595, lon: 73.736, reported_on: '2025-11-08T07:15:00+05:30', notes: 'Hinjawadi - Road repair work in progress.'},
+        {id: 'A-018', type: 'debris', severity: 1, lat: 18.594, lon: 73.737, reported_on: '2025-11-07T16:45:00+05:30', notes: 'Hinjawadi Phase 1 - Minor debris on service road.'},
+        {id: 'A-019', type: 'pothole', severity: 2, lat: 18.593, lon: 73.738, reported_on: '2025-11-06T14:20:00+05:30', notes: 'Hinjawadi - Small pothole near residential area.'},
+        {id: 'A-020', type: 'fallen_tree', severity: 2, lat: 18.592, lon: 73.739, reported_on: '2025-11-07T21:30:00+05:30', notes: 'Hinjawadi - Tree branch blocking one lane.'},
+        {id: 'A-021', type: 'pothole', severity: 3, lat: 18.595, lon: 73.740, reported_on: '2025-11-08T11:00:00+05:30', notes: 'Hinjawadi Phase 2 - Pothole cluster on main thoroughfare.'},
+        {id: 'A-022', type: 'waterlogging', severity: 3, lat: 18.594, lon: 73.741, reported_on: '2025-11-06T09:15:00+05:30', notes: 'Hinjawadi - Water accumulation near junction.'},
+        {id: 'A-023', type: 'road_construction', severity: 4, lat: 18.593, lon: 73.742, reported_on: '2025-11-08T08:30:00+05:30', notes: 'Hinjawadi - Major construction blocking two lanes.'},
+        {id: 'A-024', type: 'debris', severity: 2, lat: 18.592, lon: 73.743, reported_on: '2025-11-07T17:00:00+05:30', notes: 'Hinjawadi Phase 1 - Metal scraps on road shoulder.'},
+        {id: 'A-025', type: 'pothole', severity: 4, lat: 18.591, lon: 73.744, reported_on: '2025-11-08T10:45:00+05:30', notes: 'Hinjawadi - Large pothole causing traffic slowdown.'},
+        {id: 'A-026', type: 'pothole', severity: 3, lat: 18.596, lon: 73.737, reported_on: '2025-11-09T10:00:00+05:30', notes: 'Near Embassy TechZone entrance - medium pothole.'},
+        {id: 'A-027', type: 'debris', severity: 2, lat: 18.597, lon: 73.738, reported_on: '2025-11-09T11:30:00+05:30', notes: 'Embassy TechZone - Construction debris on side road.'},
+        {id: 'A-028', type: 'road_construction', severity: 4, lat: 18.598, lon: 73.739, reported_on: '2025-11-09T09:00:00+05:30', notes: 'Marunji Road junction - Road work in progress.'},
+        {id: 'A-029', type: 'waterlogging', severity: 3, lat: 18.599, lon: 73.740, reported_on: '2025-11-08T14:00:00+05:30', notes: 'South of Embassy TechZone - Water accumulation.'},
+        {id: 'A-030', type: 'pothole', severity: 5, lat: 18.600, lon: 73.741, reported_on: '2025-11-09T08:15:00+05:30', notes: 'North of Embassy TechZone - Deep pothole on main road.'},
+        {id: 'A-031', type: 'fallen_tree', severity: 3, lat: 18.594, lon: 73.740, reported_on: '2025-11-08T22:00:00+05:30', notes: 'Marunji Road - Small branch partially blocking lane.'},
+        {id: 'A-032', type: 'pothole', severity: 2, lat: 18.593, lon: 73.739, reported_on: '2025-11-09T13:00:00+05:30', notes: 'Embassy TechZone area - Minor surface damage.'},
+        {id: 'A-033', type: 'debris', severity: 1, lat: 18.592, lon: 73.738, reported_on: '2025-11-09T14:30:00+05:30', notes: 'Marunji Road - Leaves and small stones on pavement.'},
+        {id: 'A-034', type: 'pothole', severity: 4, lat: 18.595, lon: 73.737, reported_on: '2025-11-09T15:00:00+05:30', notes: 'Embassy TechZone - Large pothole near parking area.'},
+        {id: 'A-035', type: 'road_construction', severity: 3, lat: 18.596, lon: 73.738, reported_on: '2025-11-09T16:00:00+05:30', notes: 'Marunji Road - Temporary roadworks near TechZone.'},
+        {id: 'A-036', type: 'pothole', severity: 4, lat: 18.597, lon: 73.739, reported_on: '2025-11-09T17:00:00+05:30', notes: 'Marked area - Deep pothole on Marunji Road.'},
+        {id: 'A-037', type: 'debris', severity: 3, lat: 18.598, lon: 73.740, reported_on: '2025-11-09T18:00:00+05:30', notes: 'Marked area - Construction debris near Embassy TechZone.'},
+        {id: 'A-038', type: 'road_construction', severity: 5, lat: 18.599, lon: 73.741, reported_on: '2025-11-09T19:00:00+05:30', notes: 'Marked area - Major road construction blocking traffic.'},
+        {id: 'A-039', type: 'waterlogging', severity: 4, lat: 18.600, lon: 73.742, reported_on: '2025-11-09T20:00:00+05:30', notes: 'Marked area - Severe waterlogging in enclosed region.'},
+        {id: 'A-040', type: 'pothole', severity: 3, lat: 18.601, lon: 73.743, reported_on: '2025-11-09T21:00:00+05:30', notes: 'Marked area - Multiple potholes on main route.'},
+        {id: 'A-041', type: 'fallen_tree', severity: 3, lat: 18.602, lon: 73.744, reported_on: '2025-11-09T22:00:00+05:30', notes: 'Marked area - Fallen tree branch blocking lane.'},
+        {id: 'A-042', type: 'debris', severity: 2, lat: 18.603, lon: 73.745, reported_on: '2025-11-09T23:00:00+05:30', notes: 'Marked area - Scattered debris on road.'},
+        {id: 'A-043', type: 'pothole', severity: 5, lat: 18.604, lon: 73.746, reported_on: '2025-11-10T08:00:00+05:30', notes: 'Marked area - Very deep pothole requiring immediate attention.'},
+        {id: 'A-044', type: 'road_construction', severity: 4, lat: 18.605, lon: 73.747, reported_on: '2025-11-10T09:00:00+05:30', notes: 'Marked area - Ongoing utility work causing delays.'},
+        {id: 'A-045', type: 'pothole', severity: 4, lat: 18.597, lon: 73.730, reported_on: '2025-11-10T10:00:00+05:30', notes: 'Left of marked area - Deep pothole on side road.'},
+        {id: 'A-046', type: 'debris', severity: 2, lat: 18.598, lon: 73.731, reported_on: '2025-11-10T11:00:00+05:30', notes: 'Left of marked area - Construction material scattered.'},
+        {id: 'A-047', type: 'road_construction', severity: 4, lat: 18.599, lon: 73.732, reported_on: '2025-11-10T12:00:00+05:30', notes: 'Left of marked area - Road widening work in progress.'},
+        {id: 'A-048', type: 'waterlogging', severity: 3, lat: 18.600, lon: 73.733, reported_on: '2025-11-10T13:00:00+05:30', notes: 'Left of marked area - Water accumulation after rain.'},
+        {id: 'A-049', type: 'pothole', severity: 3, lat: 18.601, lon: 73.734, reported_on: '2025-11-10T14:00:00+05:30', notes: 'Left of marked area - Medium pothole cluster.'},
+        {id: 'A-050', type: 'fallen_tree', severity: 2, lat: 18.602, lon: 73.735, reported_on: '2025-11-10T15:00:00+05:30', notes: 'Left of marked area - Tree branch on road shoulder.'},
+        {id: 'A-051', type: 'debris', severity: 2, lat: 18.603, lon: 73.736, reported_on: '2025-11-10T16:00:00+05:30', notes: 'Left of marked area - Debris on service lane.'},
+        {id: 'A-052', type: 'pothole', severity: 5, lat: 18.604, lon: 73.737, reported_on: '2025-11-10T17:00:00+05:30', notes: 'Left of marked area - Very deep pothole requiring repair.'},
+        {id: 'A-053', type: 'road_construction', severity: 3, lat: 18.605, lon: 73.738, reported_on: '2025-11-10T18:00:00+05:30', notes: 'Left of marked area - Minor construction activity.'}
+      ],
+      statistics: {total_hazards: 53, total_severity: 168, average_severity: 3.17, hazard_types: {pothole: 21, debris: 11, road_construction: 10, waterlogging: 6, fallen_tree: 5}}
+    },
+    route_b: {
+      route_name: 'Route B',
+      hazards: [
+        {id: 'B-001', type: 'pothole', severity: 2, lat: 18.602, lon: 73.735, reported_on: '2025-11-07T11:00:00+05:30', notes: 'Small pothole near turning; avoidable.'},
+        {id: 'B-002', type: 'debris', severity: 2, lat: 18.600, lon: 73.737, reported_on: '2025-11-07T14:30:00+05:30', notes: 'Plastic and small stones on shoulder.'},
+        {id: 'B-003', type: 'road_construction', severity: 3, lat: 18.598, lon: 73.739, reported_on: '2025-11-08T09:00:00+05:30', notes: 'Temporary works; traffic managed by flagging.'},
+        {id: 'B-004', type: 'pothole', severity: 1, lat: 18.596, lon: 73.741, reported_on: '2025-11-06T09:20:00+05:30', notes: 'Shallow patch, low impact.'},
+        {id: 'B-005', type: 'waterlogging', severity: 2, lat: 18.594, lon: 73.743, reported_on: '2025-11-07T07:10:00+05:30', notes: 'Minor pooling near storm drain; passable.'},
+        {id: 'B-006', type: 'pothole', severity: 2, lat: 18.592, lon: 73.745, reported_on: '2025-11-07T15:00:00+05:30', notes: 'Minor surface damage on right lane.'},
+        {id: 'B-007', type: 'debris', severity: 1, lat: 18.590, lon: 73.747, reported_on: '2025-11-06T10:30:00+05:30', notes: 'Small debris on road shoulder.'},
+        {id: 'B-008', type: 'pothole', severity: 1, lat: 18.591, lon: 73.732, reported_on: '2025-11-07T12:00:00+05:30', notes: 'Hinjawadi Phase 1 - Minor pothole on side road.'},
+        {id: 'B-009', type: 'debris', severity: 1, lat: 18.590, lon: 73.733, reported_on: '2025-11-06T15:30:00+05:30', notes: 'Hinjawadi - Small debris near tech park.'},
+        {id: 'B-010', type: 'pothole', severity: 2, lat: 18.589, lon: 73.734, reported_on: '2025-11-08T08:45:00+05:30', notes: 'Hinjawadi Phase 2 - Small pothole on main road.'},
+        {id: 'B-011', type: 'waterlogging', severity: 2, lat: 18.588, lon: 73.735, reported_on: '2025-11-07T06:20:00+05:30', notes: 'Hinjawadi - Minor waterlogging after light rain.'},
+        {id: 'B-012', type: 'road_construction', severity: 2, lat: 18.587, lon: 73.736, reported_on: '2025-11-08T10:00:00+05:30', notes: 'Hinjawadi - Minor road work, single lane affected.'},
+        {id: 'B-013', type: 'pothole', severity: 1, lat: 18.586, lon: 73.737, reported_on: '2025-11-06T11:45:00+05:30', notes: 'Hinjawadi Phase 1 - Very minor surface damage.'},
+        {id: 'B-014', type: 'debris', severity: 1, lat: 18.585, lon: 73.738, reported_on: '2025-11-07T18:00:00+05:30', notes: 'Hinjawadi - Small debris on service lane.'},
+        {id: 'B-015', type: 'pothole', severity: 2, lat: 18.584, lon: 73.739, reported_on: '2025-11-08T09:15:00+05:30', notes: 'Hinjawadi Phase 2 - Small pothole near junction.'},
+        {id: 'B-016', type: 'pothole', severity: 2, lat: 18.585, lon: 73.740, reported_on: '2025-11-09T10:45:00+05:30', notes: 'Marunji Road - Small pothole on main route.'},
+        {id: 'B-017', type: 'debris', severity: 1, lat: 18.586, lon: 73.741, reported_on: '2025-11-09T12:15:00+05:30', notes: 'Embassy TechZone - Plastic waste near roadside.'},
+        {id: 'B-018', type: 'road_construction', severity: 3, lat: 18.587, lon: 73.742, reported_on: '2025-11-09T09:30:00+05:30', notes: 'Marunji Road - Temporary roadworks, minor delays.'},
+        {id: 'B-019', type: 'waterlogging', severity: 2, lat: 18.588, lon: 73.743, reported_on: '2025-11-08T15:30:00+05:30', notes: 'Embassy TechZone area - Minor pooling after rain.'},
+        {id: 'B-020', type: 'pothole', severity: 4, lat: 18.589, lon: 73.744, reported_on: '2025-11-09T08:00:00+05:30', notes: 'Marunji Road - Medium pothole, requires attention.'},
+        {id: 'B-021', type: 'debris', severity: 2, lat: 18.590, lon: 73.745, reported_on: '2025-11-09T13:45:00+05:30', notes: 'Embassy TechZone - Scattered gravel on road.'},
+        {id: 'B-022', type: 'pothole', severity: 3, lat: 18.591, lon: 73.746, reported_on: '2025-11-09T11:00:00+05:30', notes: 'Marunji Road - Uneven surface near turn.'},
+        {id: 'B-023', type: 'pothole', severity: 2, lat: 18.592, lon: 73.747, reported_on: '2025-11-09T14:00:00+05:30', notes: 'Embassy TechZone - Minor pothole near entrance.'},
+        {id: 'B-024', type: 'debris', severity: 1, lat: 18.593, lon: 73.748, reported_on: '2025-11-09T15:30:00+05:30', notes: 'Marunji Road - Small debris accumulation.'},
+        {id: 'B-025', type: 'pothole', severity: 2, lat: 18.594, lon: 73.738, reported_on: '2025-11-09T16:00:00+05:30', notes: 'Marked area - Small pothole within enclosed region.'},
+        {id: 'B-026', type: 'debris', severity: 1, lat: 18.595, lon: 73.739, reported_on: '2025-11-09T17:00:00+05:30', notes: 'Marked area - Minor debris on road.'},
+        {id: 'B-027', type: 'road_construction', severity: 2, lat: 18.596, lon: 73.740, reported_on: '2025-11-09T17:30:00+05:30', notes: 'Marked area - Minor construction work.'},
+        {id: 'B-028', type: 'waterlogging', severity: 2, lat: 18.597, lon: 73.741, reported_on: '2025-11-09T18:00:00+05:30', notes: 'Marked area - Light waterlogging.'},
+        {id: 'B-029', type: 'pothole', severity: 3, lat: 18.598, lon: 73.742, reported_on: '2025-11-09T19:00:00+05:30', notes: 'Marked area - Medium pothole on route.'},
+        {id: 'B-030', type: 'debris', severity: 2, lat: 18.599, lon: 73.743, reported_on: '2025-11-09T20:00:00+05:30', notes: 'Marked area - Debris accumulation.'},
+        {id: 'B-031', type: 'pothole', severity: 2, lat: 18.600, lon: 73.744, reported_on: '2025-11-09T21:00:00+05:30', notes: 'Marked area - Small pothole cluster.'},
+        {id: 'B-032', type: 'pothole', severity: 2, lat: 18.594, lon: 73.730, reported_on: '2025-11-10T10:00:00+05:30', notes: 'Left of marked area - Small pothole on side road.'},
+        {id: 'B-033', type: 'debris', severity: 1, lat: 18.595, lon: 73.731, reported_on: '2025-11-10T11:00:00+05:30', notes: 'Left of marked area - Minor debris accumulation.'},
+        {id: 'B-034', type: 'road_construction', severity: 2, lat: 18.596, lon: 73.732, reported_on: '2025-11-10T12:00:00+05:30', notes: 'Left of marked area - Small-scale road work.'},
+        {id: 'B-035', type: 'waterlogging', severity: 2, lat: 18.597, lon: 73.733, reported_on: '2025-11-10T13:00:00+05:30', notes: 'Left of marked area - Minor waterlogging.'},
+        {id: 'B-036', type: 'pothole', severity: 3, lat: 18.598, lon: 73.734, reported_on: '2025-11-10T14:00:00+05:30', notes: 'Left of marked area - Medium pothole.'},
+        {id: 'B-037', type: 'debris', severity: 1, lat: 18.599, lon: 73.735, reported_on: '2025-11-10T15:00:00+05:30', notes: 'Left of marked area - Small debris on shoulder.'},
+        {id: 'B-038', type: 'pothole', severity: 2, lat: 18.600, lon: 73.736, reported_on: '2025-11-10T16:00:00+05:30', notes: 'Left of marked area - Minor pothole.'}
+      ],
+      statistics: {total_hazards: 38, total_severity: 72, average_severity: 1.89, hazard_types: {pothole: 17, debris: 11, road_construction: 5, waterlogging: 5}}
+    },
+    comparison: {
+      preferred_route: 'Route B',
+      route_a_score: 221,
+      route_b_score: 110,
+      recommendation: 'Route B has fewer hazards (Score: 110 vs 221)'
+    }
+  };
+
+  // Fetch route comparison data function (defined outside useEffect so it can be reused)
+  const fetchRouteComparison = async () => {
+    try {
+      setRouteComparisonLoading(true);
+      setRouteComparisonError(null);
+      const response = await apiClient.get('/api/routes/compare');
+      console.log('✅ Route comparison data loaded from API:', response.data);
+      setRouteComparison(response.data);
+      setRouteComparisonLoading(false);
+    } catch (err) {
+      console.warn('⚠️ API call failed, using fallback data:', err.message);
+      // Use fallback data if API fails
+      console.log('✅ Using hardcoded route data (fallback)');
+      setRouteComparison(fallbackRouteData);
+      setRouteComparisonLoading(false);
+      setRouteComparisonError(null); // Don't show error if we have fallback
+    }
+  };
+
   useEffect(() => {
     // Fetch pothole data from our API
     const fetchPotholes = async () => {
       try {
         setLoading(true);
-        const response = await apiClient.get('/api/hazard-reports');
+      const response = await apiClient.get('/api/hazard-reports');
         setPotholes(response.data);
         setLoading(false);
       } catch (err) {
@@ -42,6 +194,7 @@ export default function PotholeMap() {
     };
     
     fetchPotholes();
+    fetchRouteComparison();
   }, []);
   
   useEffect(() => {
@@ -71,11 +224,45 @@ export default function PotholeMap() {
     const createMap = () => {
       if (!mapRef.current) return;
       
-      // Calculate center point from all potholes
-      let centerLat = 0;
-      let centerLng = 0;
+      // Calculate center point - prioritize current location, then route hazards, then potholes
+      let centerLat = 18.594; // Default to Pune
+      let centerLng = 73.744;
+      let zoom = 13;
       
-      if (potholes.length > 0) {
+      // Priority 1: Use current location if available
+      if (currentLocation && currentLocation.lat && currentLocation.lon) {
+        centerLat = currentLocation.lat;
+        centerLng = currentLocation.lon;
+        zoom = 15; // Zoom in more for current location
+      }
+      // Priority 2: If we have route comparison data, center on that
+      else if (routeComparison && routeComparison.route_a && routeComparison.route_a.hazards && routeComparison.route_a.hazards.length > 0) {
+        let totalLat = 0;
+        let totalLng = 0;
+        let count = 0;
+        
+        // Calculate center from all route hazards
+        routeComparison.route_a.hazards.forEach(hazard => {
+          totalLat += hazard.lat;
+          totalLng += hazard.lon;
+          count++;
+        });
+        
+        if (routeComparison.route_b && routeComparison.route_b.hazards) {
+          routeComparison.route_b.hazards.forEach(hazard => {
+            totalLat += hazard.lat;
+            totalLng += hazard.lon;
+            count++;
+          });
+        }
+        
+        if (count > 0) {
+          centerLat = totalLat / count;
+          centerLng = totalLng / count;
+        }
+      } 
+      // Priority 3: Fallback to potholes
+      else if (potholes.length > 0) {
         potholes.forEach(pothole => {
           if (pothole.location && pothole.location.lat && pothole.location.lng) {
             centerLat += pothole.location.lat;
@@ -85,22 +272,26 @@ export default function PotholeMap() {
         
         centerLat /= potholes.length;
         centerLng /= potholes.length;
-      } else {
-        // Default center (can be adjusted)
-        centerLat = 0;
-        centerLng = 0;
       }
       
-      // Create Leaflet map instance
-      const map = L.map(mapRef.current).setView([centerLat, centerLng], potholes.length > 0 ? 13 : 2);
+      // Create Leaflet map instance - center on current location, route hazards, or default
+      const map = L.map(mapRef.current).setView([centerLat, centerLng], zoom);
       
-      // Add OpenStreetMap tile layer
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      // Add Dark theme map tile layer (CartoDB Dark Matter)
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
         maxZoom: 19
       }).addTo(map);
       
       mapInstanceRef.current = map;
+      
+      // If we have current location, center map on it immediately
+      if (currentLocation && currentLocation.lat && currentLocation.lon) {
+        map.setView([currentLocation.lat, currentLocation.lon], 15, {
+          animate: false // No animation on initial load
+        });
+      }
       
       // Add markers for each pothole
       potholes.forEach(pothole => {
@@ -157,10 +348,18 @@ export default function PotholeMap() {
         }
       }
       
-      // Fit map bounds to show all markers if we have potholes
-      if (potholes.length > 0 && markersRef.current.length > 0) {
+      // Fit map bounds to show all markers if we have potholes (but don't override route hazards)
+      if (potholes.length > 0 && markersRef.current.length > 0 && !showRouteComparison) {
         const group = new L.featureGroup(markersRef.current);
         map.fitBounds(group.getBounds().pad(0.1));
+      }
+      
+      // Always display route hazards if data is available (markers shown by default)
+      if (routeComparison) {
+        setTimeout(() => {
+          console.log('Map initialized, displaying route hazards automatically...');
+          displayRouteHazards();
+        }, 800);
       }
     };
     
@@ -179,14 +378,459 @@ export default function PotholeMap() {
         routeMarkersRef.current.forEach(marker => {
           mapInstanceRef.current.removeLayer(marker);
         });
+        routeHazardMarkersRef.current.forEach(marker => {
+          mapInstanceRef.current.removeLayer(marker);
+        });
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
       }
       markersRef.current = [];
       routeMarkersRef.current = [];
       alternativeRoutesRef.current = [];
+      routeHazardMarkersRef.current = [];
     };
-  }, [potholes]);
+  }, [potholes, routeComparison, showRouteComparison]);
+  
+  // Function to get hazard icon based on type and route
+  const getHazardIcon = (hazardType, severity, routeName) => {
+    const size = 30 + (severity * 5); // Size based on severity (30-55px) - MUCH LARGER
+    const routeColor = routeName === 'Route A' ? '#3498db' : '#e74c3c'; // Blue for Route A, Red for Route B
+    
+    // Different colors and shapes for different hazard types
+    let hazardColor = '#e74c3c'; // Default red
+    let shape = 'circle'; // circle, square, triangle, diamond
+    let symbol = '';
+    
+    switch(hazardType) {
+      case 'pothole':
+        hazardColor = '#8b4513'; // Brown
+        shape = 'circle';
+        symbol = 'P';
+        break;
+      case 'debris':
+        hazardColor = '#f39c12'; // Orange
+        shape = 'diamond';
+        symbol = 'D';
+        break;
+      case 'road_construction':
+        hazardColor = '#e67e22'; // Dark orange
+        shape = 'square';
+        symbol = '⚠';
+        break;
+      case 'waterlogging':
+        hazardColor = '#3498db'; // Blue
+        shape = 'triangle-down';
+        symbol = 'W';
+        break;
+      case 'fallen_tree':
+        hazardColor = '#27ae60'; // Green
+        shape = 'triangle-up';
+        symbol = 'T';
+        break;
+      default:
+        hazardColor = '#e74c3c';
+        shape = 'circle';
+        symbol = '?';
+    }
+    
+    // Create shape-specific styles
+    let shapeStyle = '';
+    switch(shape) {
+      case 'square':
+        shapeStyle = 'border-radius: 4px;';
+        break;
+      case 'diamond':
+        shapeStyle = 'border-radius: 0; transform: rotate(45deg);';
+        break;
+      case 'triangle-up':
+        shapeStyle = 'border-radius: 0; clip-path: polygon(50% 0%, 0% 100%, 100% 100%);';
+        break;
+      case 'triangle-down':
+        shapeStyle = 'border-radius: 0; clip-path: polygon(0% 0%, 100% 0%, 50% 100%);';
+        break;
+      default: // circle
+        shapeStyle = 'border-radius: 50%;';
+    }
+    
+    return L.divIcon({
+      className: 'route-hazard-marker',
+      html: `<div style="
+        background-color: ${hazardColor}; 
+        width: ${size}px; 
+        height: ${size}px; 
+        ${shapeStyle}
+        border: 4px solid ${routeColor}; 
+        box-shadow: 0 4px 12px rgba(0,0,0,0.8), 0 0 0 2px white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 900;
+        font-size: ${Math.max(14, size * 0.4)}px;
+        text-align: center;
+        line-height: 1;
+        z-index: 10000;
+        position: relative;
+      ">${shape === 'diamond' ? '<span style="transform: rotate(-45deg); display: inline-block;">' + symbol + '</span>' : symbol}</div>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      popupAnchor: [0, -size / 2]
+    });
+  };
+  
+  // Function to display route hazards on map
+  const displayRouteHazards = () => {
+    if (!mapInstanceRef.current) {
+      console.warn('Map instance not available');
+      return;
+    }
+    if (!routeComparison) {
+      console.warn('Route comparison data not available');
+      return;
+    }
+    
+    console.log('=== DISPLAYING ROUTE HAZARDS ===');
+    console.log('Route comparison:', routeComparison);
+    console.log('Route A hazards:', routeComparison.route_a?.hazards?.length || 0);
+    console.log('Route B hazards:', routeComparison.route_b?.hazards?.length || 0);
+    
+    // Clear existing route hazard markers
+    routeHazardMarkersRef.current.forEach(marker => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.removeLayer(marker);
+      }
+    });
+    routeHazardMarkersRef.current = [];
+    
+    let routeACount = 0;
+    let routeBCount = 0;
+    
+    // Display Route A hazards
+    if (routeComparison.route_a && routeComparison.route_a.hazards && Array.isArray(routeComparison.route_a.hazards)) {
+      console.log(`Processing ${routeComparison.route_a.hazards.length} Route A hazards`);
+      routeComparison.route_a.hazards.forEach((hazard, index) => {
+        try {
+          if (!hazard.lat || !hazard.lon) {
+            console.warn(`Route A hazard ${index} missing coordinates:`, hazard);
+            return;
+          }
+          console.log(`Adding Route A hazard ${index + 1}/${routeComparison.route_a.hazards.length}:`, hazard.id, 'at', hazard.lat, hazard.lon);
+          const icon = getHazardIcon(hazard.type, hazard.severity, 'Route A');
+          const marker = L.marker([hazard.lat, hazard.lon], { 
+            icon,
+            zIndexOffset: 1000 + index
+          }).addTo(mapInstanceRef.current);
+          
+          const popupContent = `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.9rem; min-width: 200px;">
+              <h3 style="margin-top: 0; margin-bottom: 5px; font-size: 1rem; color: #3498db;">Route A - ${(hazard.type || 'Unknown').replace('_', ' ')}</h3>
+              <p style="margin: 4px 0;"><strong>ID:</strong> ${hazard.id}</p>
+              <p style="margin: 4px 0;"><strong>Severity:</strong> ${hazard.severity}/5</p>
+              <p style="margin: 4px 0;"><strong>Reported:</strong> ${new Date(hazard.reported_on).toLocaleString()}</p>
+              <p style="margin: 4px 0;"><strong>Notes:</strong> ${hazard.notes || 'N/A'}</p>
+            </div>
+          `;
+          marker.bindPopup(popupContent);
+          routeHazardMarkersRef.current.push(marker);
+          routeACount++;
+        } catch (err) {
+          console.error(`Error adding Route A hazard ${index}:`, err, hazard);
+        }
+      });
+    } else {
+      console.warn('Route A has no hazards or hazards is not an array');
+    }
+    
+    // Display Route B hazards
+    if (routeComparison.route_b && routeComparison.route_b.hazards && Array.isArray(routeComparison.route_b.hazards)) {
+      console.log(`Processing ${routeComparison.route_b.hazards.length} Route B hazards`);
+      routeComparison.route_b.hazards.forEach((hazard, index) => {
+        try {
+          if (!hazard.lat || !hazard.lon) {
+            console.warn(`Route B hazard ${index} missing coordinates:`, hazard);
+            return;
+          }
+          console.log(`Adding Route B hazard ${index + 1}/${routeComparison.route_b.hazards.length}:`, hazard.id, 'at', hazard.lat, hazard.lon);
+          const icon = getHazardIcon(hazard.type, hazard.severity, 'Route B');
+          const marker = L.marker([hazard.lat, hazard.lon], { 
+            icon,
+            zIndexOffset: 1000 + routeACount + index
+          }).addTo(mapInstanceRef.current);
+          
+          const popupContent = `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.9rem; min-width: 200px;">
+              <h3 style="margin-top: 0; margin-bottom: 5px; font-size: 1rem; color: #e74c3c;">Route B - ${(hazard.type || 'Unknown').replace('_', ' ')}</h3>
+              <p style="margin: 4px 0;"><strong>ID:</strong> ${hazard.id}</p>
+              <p style="margin: 4px 0;"><strong>Severity:</strong> ${hazard.severity}/5</p>
+              <p style="margin: 4px 0;"><strong>Reported:</strong> ${new Date(hazard.reported_on).toLocaleString()}</p>
+              <p style="margin: 4px 0;"><strong>Notes:</strong> ${hazard.notes || 'N/A'}</p>
+            </div>
+          `;
+          marker.bindPopup(popupContent);
+          routeHazardMarkersRef.current.push(marker);
+          routeBCount++;
+        } catch (err) {
+          console.error(`Error adding Route B hazard ${index}:`, err, hazard);
+        }
+      });
+    } else {
+      console.warn('Route B has no hazards or hazards is not an array');
+    }
+    
+    console.log(`✅ SUCCESS: Added ${routeACount} Route A markers and ${routeBCount} Route B markers`);
+    console.log(`Total markers on map: ${routeHazardMarkersRef.current.length}`);
+    
+    // Fit map to show all route hazards and center on Pune
+    if (routeHazardMarkersRef.current.length > 0) {
+      const group = new L.featureGroup(routeHazardMarkersRef.current);
+      const bounds = group.getBounds();
+      mapInstanceRef.current.fitBounds(bounds.pad(0.2));
+      console.log('Map fitted to show all route hazards');
+      console.log('Bounds:', bounds.toBBoxString());
+    } else {
+      console.warn('No route hazard markers were added to the map');
+      // If no markers, center on Pune (approximate center of the route data)
+      mapInstanceRef.current.setView([18.594, 73.744], 13);
+      console.log('Centered map on Pune (default location)');
+    }
+  };
+  
+  // Auto-show routes when data loads (markers are shown by default)
+  useEffect(() => {
+    if (routeComparison) {
+      console.log('Route comparison data loaded, markers will be displayed automatically');
+      // Markers are already enabled by default (showRouteComparison starts as true)
+    }
+  }, [routeComparison]);
+  
+  // Effect to display route hazards automatically when map/data becomes available
+  useEffect(() => {
+    console.log('Route display effect:', { 
+      showRouteComparison, 
+      hasRouteComparison: !!routeComparison, 
+      hasMap: !!mapInstanceRef.current,
+      routeACount: routeComparison?.route_a?.hazards?.length || 0,
+      routeBCount: routeComparison?.route_b?.hazards?.length || 0
+    });
+    
+    // Always display markers if data is available and map is ready (default behavior)
+    if (showRouteComparison && routeComparison && mapInstanceRef.current) {
+      // Ensure markers are displayed with retry logic
+      let retryCount = 0;
+      const maxRetries = 15;
+      
+      const checkAndDisplay = () => {
+        if (mapInstanceRef.current && routeComparison) {
+          console.log('✅ Map and data ready, displaying ALL hazards automatically...');
+          displayRouteHazards();
+        } else if (retryCount < maxRetries) {
+          retryCount++;
+          console.log(`⏳ Waiting for map/data... (${retryCount}/${maxRetries})`);
+          setTimeout(checkAndDisplay, 400);
+        } else {
+          console.error('❌ Failed to display route hazards after max retries');
+        }
+      };
+      // Start immediately, no delay
+      checkAndDisplay();
+    } else if (!showRouteComparison && mapInstanceRef.current) {
+      // Remove route hazard markers when toggled off
+      routeHazardMarkersRef.current.forEach(marker => {
+        mapInstanceRef.current.removeLayer(marker);
+      });
+      routeHazardMarkersRef.current = [];
+      console.log('Route hazard markers removed');
+    }
+  }, [showRouteComparison, routeComparison]);
+
+  // Get current location first (before map creation if possible)
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      console.warn('Geolocation not supported');
+      return;
+    }
+
+    // Get initial location immediately
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const initialLocation = {
+          lat: position.coords.latitude,
+          lon: position.coords.longitude
+        };
+        
+        // Use heading from position if available
+        if (position.coords.heading !== null && position.coords.heading !== undefined && !isNaN(position.coords.heading)) {
+          setHeading(position.coords.heading);
+        }
+        
+        previousLocationRef.current = { ...initialLocation };
+        setCurrentLocation(initialLocation);
+        
+        // If map is already created, center on location immediately
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.setView([initialLocation.lat, initialLocation.lon], 15, {
+            animate: true,
+            duration: 0.5
+          });
+        }
+      },
+      (error) => {
+        console.warn('Initial geolocation error:', error);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 10000,
+        timeout: 5000
+      }
+    );
+  }, []); // Run once on mount to get initial location
+
+  // Track current location and add marker to map
+  useEffect(() => {
+    let watchId = null;
+    let checkMapReady = null;
+    let isFirstLocation = true; // Track if this is the first location update
+
+    // Wait for map to be ready
+    checkMapReady = setInterval(() => {
+      if (mapInstanceRef.current) {
+        clearInterval(checkMapReady);
+        
+        if (!navigator.geolocation) {
+          console.warn('Geolocation not supported');
+          return;
+        }
+
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            if (!mapInstanceRef.current) return;
+
+            const newLocation = {
+              lat: position.coords.latitude,
+              lon: position.coords.longitude
+            };
+
+            // Calculate heading from movement
+            let currentHeading = null;
+            if (previousLocationRef.current) {
+              const calculatedHeading = calculateHeadingFromMovement(
+                previousLocationRef.current,
+                newLocation
+              );
+              if (calculatedHeading !== null) {
+                currentHeading = calculatedHeading;
+                setHeading(calculatedHeading);
+              }
+            }
+
+            // Use heading from position if available
+            if (position.coords.heading !== null && position.coords.heading !== undefined && !isNaN(position.coords.heading)) {
+              currentHeading = position.coords.heading;
+              setHeading(position.coords.heading);
+            }
+
+            previousLocationRef.current = { ...newLocation };
+            setCurrentLocation(newLocation);
+
+            // Remove old marker if exists
+            if (currentLocationMarkerRef.current) {
+              mapInstanceRef.current.removeLayer(currentLocationMarkerRef.current);
+            }
+
+            // Create vehicle location marker with direction indicator
+            const displayHeading = currentHeading !== null ? currentHeading : 0;
+            const vehicleIcon = L.divIcon({
+              className: 'vehicle-location-marker',
+              html: `
+                <div style="
+                  width: 24px;
+                  height: 24px;
+                  background: #3b82f6;
+                  border: 3px solid white;
+                  border-radius: 50%;
+                  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+                  position: relative;
+                ">
+                  ${currentHeading !== null ? `
+                    <div style="
+                      position: absolute;
+                      top: -8px;
+                      left: 50%;
+                      transform: translateX(-50%) rotate(${displayHeading}deg);
+                      width: 0;
+                      height: 0;
+                      border-left: 6px solid transparent;
+                      border-right: 6px solid transparent;
+                      border-bottom: 12px solid #3b82f6;
+                    "></div>
+                  ` : ''}
+                </div>
+              `,
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            });
+
+            const marker = L.marker([newLocation.lat, newLocation.lon], {
+              icon: vehicleIcon,
+              zIndexOffset: 10000 // Always on top
+            }).addTo(mapInstanceRef.current);
+
+            marker.bindPopup(`
+              <div style="font-family: 'Inter', sans-serif; font-size: 0.9rem;">
+                <h3 style="margin: 0 0 8px 0; font-size: 1rem; color: #3b82f6;">📍 Your Location</h3>
+                <p style="margin: 4px 0;"><strong>Lat:</strong> ${newLocation.lat.toFixed(6)}</p>
+                <p style="margin: 4px 0;"><strong>Lon:</strong> ${newLocation.lon.toFixed(6)}</p>
+                ${currentHeading !== null ? `<p style="margin: 4px 0;"><strong>Heading:</strong> ${Math.round(displayHeading)}°</p>` : ''}
+              </div>
+            `);
+
+            currentLocationMarkerRef.current = marker;
+
+            // Center map on current location (always center on first location, then only if far)
+            if (isFirstLocation) {
+              // First location: always center the map
+              mapInstanceRef.current.setView([newLocation.lat, newLocation.lon], 15, {
+                animate: true,
+                duration: 0.5
+              });
+              isFirstLocation = false;
+            } else {
+              // Subsequent locations: only center if far from current view
+              const mapCenter = mapInstanceRef.current.getCenter();
+              const distance = Math.sqrt(
+                Math.pow(newLocation.lat - mapCenter.lat, 2) + 
+                Math.pow(newLocation.lon - mapCenter.lng, 2)
+              );
+              
+              // If vehicle is more than ~5km from map center, recenter
+              if (distance > 0.05) {
+                mapInstanceRef.current.setView([newLocation.lat, newLocation.lon], mapInstanceRef.current.getZoom(), {
+                  animate: true,
+                  duration: 1.0
+                });
+              }
+            }
+          },
+          (error) => {
+            console.warn('Geolocation error in PotholeMap:', error);
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 2000,
+            timeout: 5000
+          }
+        );
+      }
+    }, 500);
+
+    return () => {
+      if (checkMapReady) clearInterval(checkMapReady);
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (currentLocationMarkerRef.current && mapInstanceRef.current) {
+        mapInstanceRef.current.removeLayer(currentLocationMarkerRef.current);
+      }
+    };
+  }, []); // Only run once on mount
   
   const handleRefresh = async () => {
     try {
@@ -201,19 +845,212 @@ export default function PotholeMap() {
     }
   };
 
+  // Fetch autocomplete suggestions from Nominatim
+  const fetchAutocompleteSuggestions = async (query, type) => {
+    if (!query || query.trim().length < 2) {
+      if (type === 'start') {
+        setStartSuggestions([]);
+        setShowStartSuggestions(false);
+      } else {
+        setEndSuggestions([]);
+        setShowEndSuggestions(false);
+      }
+      return;
+    }
+
+    try {
+      const response = await axios.get('https://nominatim.openstreetmap.org/search', {
+        params: {
+          q: query,
+          format: 'json',
+          limit: 8, // More suggestions for better UX
+          addressdetails: 1,
+          dedupe: 1 // Remove duplicates
+        },
+        headers: {
+          'User-Agent': 'VolkswagenDasAuto/1.0',
+          'Accept': 'application/json'
+        },
+        timeout: 5000
+      });
+      
+      if (response.data && response.data.length > 0) {
+        const suggestions = response.data.map(item => ({
+          lat: parseFloat(item.lat),
+          lng: parseFloat(item.lon),
+          displayName: item.display_name,
+          type: item.type,
+          importance: item.importance || 0
+        })).sort((a, b) => b.importance - a.importance); // Sort by importance
+        
+        if (type === 'start') {
+          setStartSuggestions(suggestions);
+          setShowStartSuggestions(true);
+        } else {
+          setEndSuggestions(suggestions);
+          setShowEndSuggestions(true);
+        }
+      } else {
+        if (type === 'start') {
+          setStartSuggestions([]);
+          setShowStartSuggestions(false);
+        } else {
+          setEndSuggestions([]);
+          setShowEndSuggestions(false);
+        }
+      }
+    } catch (err) {
+      console.error('Autocomplete error:', err);
+      if (type === 'start') {
+        setStartSuggestions([]);
+        setShowStartSuggestions(false);
+      } else {
+        setEndSuggestions([]);
+        setShowEndSuggestions(false);
+      }
+    }
+  };
+
+  // Debounced autocomplete for start location
+  const handleStartLocationChange = (value) => {
+    setStartLocation(value);
+    setShowStartSuggestions(true);
+    
+    // Clear existing timer
+    if (debounceTimerRef.current.start) {
+      clearTimeout(debounceTimerRef.current.start);
+    }
+    
+    // Set new timer
+    debounceTimerRef.current.start = setTimeout(() => {
+      fetchAutocompleteSuggestions(value, 'start');
+    }, 300); // 300ms debounce
+  };
+
+  // Debounced autocomplete for end location
+  const handleEndLocationChange = (value) => {
+    setEndLocation(value);
+    setShowEndSuggestions(true);
+    
+    // Clear existing timer
+    if (debounceTimerRef.current.end) {
+      clearTimeout(debounceTimerRef.current.end);
+    }
+    
+    // Set new timer
+    debounceTimerRef.current.end = setTimeout(() => {
+      fetchAutocompleteSuggestions(value, 'end');
+    }, 300); // 300ms debounce
+  };
+
+  // Handle suggestion selection for start location
+  const handleStartSuggestionSelect = (suggestion) => {
+    setStartLocation(suggestion.displayName);
+    setStartCoords({ lat: suggestion.lat, lng: suggestion.lng, displayName: suggestion.displayName });
+    setShowStartSuggestions(false);
+    setStartSuggestions([]);
+    
+    // Add marker for start location
+    if (mapInstanceRef.current) {
+      // Remove existing start marker
+      const startMarkerIndex = routeMarkersRef.current.findIndex(m => m._routeType === 'start');
+      if (startMarkerIndex !== -1) {
+        mapInstanceRef.current.removeLayer(routeMarkersRef.current[startMarkerIndex]);
+        routeMarkersRef.current.splice(startMarkerIndex, 1);
+      }
+      
+      // Add marker for start location
+      const startMarker = L.marker([suggestion.lat, suggestion.lng], {
+        icon: L.divIcon({
+          className: 'route-marker-start',
+          html: '<div style="background-color: #2ecc71; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        })
+      }).addTo(mapInstanceRef.current);
+      startMarker._routeType = 'start';
+      startMarker.bindPopup('Start: ' + suggestion.displayName).openPopup();
+      routeMarkersRef.current.push(startMarker);
+      
+      // Center map on start location
+      mapInstanceRef.current.setView([suggestion.lat, suggestion.lng], 13);
+    }
+    
+    // Calculate route if end location is set
+    if (endCoords) {
+      calculateRoute();
+    }
+  };
+
+  // Handle suggestion selection for end location
+  const handleEndSuggestionSelect = (suggestion) => {
+    setEndLocation(suggestion.displayName);
+    setEndCoords({ lat: suggestion.lat, lng: suggestion.lng, displayName: suggestion.displayName });
+    setShowEndSuggestions(false);
+    setEndSuggestions([]);
+    
+    // Add marker for end location
+    if (mapInstanceRef.current) {
+      // Remove existing end marker
+      const endMarkerIndex = routeMarkersRef.current.findIndex(m => m._routeType === 'end');
+      if (endMarkerIndex !== -1) {
+        mapInstanceRef.current.removeLayer(routeMarkersRef.current[endMarkerIndex]);
+        routeMarkersRef.current.splice(endMarkerIndex, 1);
+      }
+      
+      // Add marker for end location
+      const endMarker = L.marker([suggestion.lat, suggestion.lng], {
+        icon: L.divIcon({
+          className: 'route-marker-end',
+          html: '<div style="background-color: #e74c3c; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        })
+      }).addTo(mapInstanceRef.current);
+      endMarker._routeType = 'end';
+      endMarker.bindPopup('End: ' + suggestion.displayName).openPopup();
+      routeMarkersRef.current.push(endMarker);
+      
+      // Center map on end location
+      mapInstanceRef.current.setView([suggestion.lat, suggestion.lng], 13);
+    }
+    
+    // Calculate route if start location is set
+    if (startCoords) {
+      calculateRoute();
+    }
+  };
+
+  // Cleanup debounce timers on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current.start) {
+        clearTimeout(debounceTimerRef.current.start);
+      }
+      if (debounceTimerRef.current.end) {
+        clearTimeout(debounceTimerRef.current.end);
+      }
+    };
+  }, []);
+
   // Geocode address using Nominatim (OpenStreetMap geocoding service)
   const geocodeAddress = async (address) => {
     try {
+      // Add delay to respect rate limits (1 request per second)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       const response = await axios.get('https://nominatim.openstreetmap.org/search', {
         params: {
           q: address,
           format: 'json',
-          limit: 1,
+          limit: 5,
           addressdetails: 1
         },
         headers: {
-          'User-Agent': 'HazardEye/1.0' // Required by Nominatim
-        }
+          'User-Agent': 'VolkswagenDasAuto/1.0',
+          'Accept': 'application/json'
+        },
+        timeout: 10000
       });
       
       if (response.data && response.data.length > 0) {
@@ -227,6 +1064,9 @@ export default function PotholeMap() {
       return null;
     } catch (err) {
       console.error('Geocoding error:', err);
+      if (err.response) {
+        console.error('Status:', err.response.status, 'Data:', err.response.data);
+      }
       return null;
     }
   };
@@ -1095,37 +1935,42 @@ export default function PotholeMap() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
-      className="min-h-screen bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460]"
+      className="min-h-screen bg-slate-950"
+      style={{ fontFamily: "'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif" }}
     >
       {/* Header */}
       <motion.div 
         initial={{ y: -50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.2 }}
-        className="bg-white/10 backdrop-blur-lg border-b border-white/20"
+        className="bg-slate-900/95 backdrop-blur-xl border-b border-slate-800/50 shadow-lg"
       >
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
           <Link to="/">
             <motion.button
               whileHover={{ scale: 1.05, x: -5 }}
               whileTap={{ scale: 0.95 }}
-              className="flex items-center gap-2 text-white hover:text-[#3498db] transition-colors"
+              className="flex items-center gap-2 px-4 py-2 text-white/90 hover:text-white hover:bg-white/10 rounded-xl transition-all duration-200 font-medium"
             >
               <ArrowLeft className="w-5 h-5" />
-              <span className="font-semibold">Back to Home</span>
+              <span>Back to Home</span>
             </motion.button>
           </Link>
           
-          <h1 className="text-2xl lg:text-3xl font-bold text-white flex items-center gap-3">
-            <MapPin className="text-[#e74c3c] w-7 h-7" />
-            Hazard Map
-          </h1>
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-red-500/20 to-orange-500/20 rounded-xl backdrop-blur-sm border border-red-500/30">
+              <MapPin className="text-red-400 w-6 h-6" />
+            </div>
+            <h1 className="text-3xl lg:text-4xl font-bold bg-gradient-to-r from-white via-white to-white/80 bg-clip-text text-transparent">
+              Hazard Map
+            </h1>
+          </div>
           
           <Link to="/live">
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="flex items-center gap-2 px-4 py-2 bg-[#3498db] text-white rounded-full font-semibold shadow-lg"
+              className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl font-semibold shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all duration-200"
             >
               <span className="hidden sm:inline">Live Detection</span>
             </motion.button>
@@ -1139,55 +1984,327 @@ export default function PotholeMap() {
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6"
+          className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8"
         >
           <motion.div 
-            whileHover={{ y: -5 }}
-            className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20"
+            whileHover={{ y: -8, scale: 1.02 }}
+            transition={{ type: "spring", stiffness: 300 }}
+            className="group relative bg-gradient-to-br from-red-500/10 via-red-500/5 to-transparent backdrop-blur-xl rounded-2xl p-6 border border-red-500/20 shadow-xl shadow-red-500/10 hover:shadow-red-500/20 transition-all duration-300 overflow-hidden"
           >
-            <div className="flex items-center justify-between mb-2">
-              <AlertTriangle className="w-10 h-10 text-[#e74c3c]" />
+            <div className="absolute inset-0 bg-gradient-to-br from-red-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-4">
+                <div className="p-3 bg-gradient-to-br from-red-500/20 to-orange-500/20 rounded-xl backdrop-blur-sm border border-red-500/30">
+                  <AlertTriangle className="w-6 h-6 text-red-400" />
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.1, rotate: 180 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={handleRefresh}
+                  disabled={loading}
+                  className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200"
+                >
+                  <RotateCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                </motion.button>
+              </div>
+              <div className="text-white/60 text-sm font-medium mb-2 uppercase tracking-wide">Total Hazard Locations</div>
+              <div className="text-5xl font-bold bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent">
+                {routeComparison 
+                  ? (routeComparison.route_a?.hazards?.length || 0) + (routeComparison.route_b?.hazards?.length || 0)
+                  : potholes.length}
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            whileHover={{ y: -8, scale: 1.02 }}
+            transition={{ type: "spring", stiffness: 300, delay: 0.05 }}
+            className="group relative bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-transparent backdrop-blur-xl rounded-2xl p-6 border border-blue-500/20 shadow-xl shadow-blue-500/10 hover:shadow-blue-500/20 transition-all duration-300 overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative z-10">
+              <div className="mb-4">
+                <div className="p-3 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-xl backdrop-blur-sm border border-blue-500/30 w-fit">
+                  <MapPin className="w-6 h-6 text-blue-400" />
+                </div>
+              </div>
+              <div className="text-white/60 text-sm font-medium mb-2 uppercase tracking-wide">Recent Reports (7 Days)</div>
+              <div className="text-5xl font-bold bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent">
+                {routeComparison 
+                  ? (() => {
+                      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                      const routeAHazards = routeComparison.route_a?.hazards || [];
+                      const routeBHazards = routeComparison.route_b?.hazards || [];
+                      const allHazards = [...routeAHazards, ...routeBHazards];
+                      return allHazards.filter(h => new Date(h.reported_on) > sevenDaysAgo).length;
+                    })()
+                  : potholes.filter(p => new Date(p.timestamp) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            whileHover={{ y: -8, scale: 1.02 }}
+            transition={{ type: "spring", stiffness: 300, delay: 0.1 }}
+            className="group relative bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent backdrop-blur-xl rounded-2xl p-6 border border-amber-500/20 shadow-xl shadow-amber-500/10 hover:shadow-amber-500/20 transition-all duration-300 overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative z-10">
+              <div className="mb-4">
+                <div className="p-3 bg-gradient-to-br from-amber-500/20 to-yellow-500/20 rounded-xl backdrop-blur-sm border border-amber-500/30 w-fit">
+                  <AlertTriangle className="w-6 h-6 text-amber-400" />
+                </div>
+              </div>
+              <div className="text-white/60 text-sm font-medium mb-2 uppercase tracking-wide">Active Hazards</div>
+              <div className="text-5xl font-bold bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent">
+                {routeComparison 
+                  ? (routeComparison.route_a?.hazards?.length || 0) + (routeComparison.route_b?.hazards?.length || 0)
+                  : potholes.filter(p => p.status === 'reported').length}
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+
+        {/* Route Comparison Panel */}
+        <motion.div 
+          initial={{ y: 30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.15 }}
+          className="bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-800/50 shadow-xl mb-8 overflow-hidden"
+        >
+          <div className="bg-slate-800/50 px-6 py-5 border-b border-slate-800/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-xl backdrop-blur-sm border border-blue-500/30">
+                <Navigation className="text-blue-400 w-5 h-5" />
+              </div>
+              <h2 className="text-white text-2xl font-bold">Route Comparison</h2>
+            </div>
+            {routeComparison && (
               <motion.button
-                whileHover={{ scale: 1.1, rotate: 180 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={handleRefresh}
-                disabled={loading}
-                className="text-white hover:text-[#3498db] transition-colors"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setShowRouteComparison(!showRouteComparison)}
+                className={`px-5 py-2.5 rounded-xl font-semibold transition-all duration-200 ${
+                  showRouteComparison 
+                    ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-lg shadow-green-500/30 hover:shadow-green-500/50' 
+                    : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'
+                }`}
               >
-                <RotateCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                {showRouteComparison ? 'Hide Routes' : 'Show Routes'}
               </motion.button>
+            )}
+          </div>
+          
+          {routeComparisonLoading ? (
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 border-4 border-[#3498db] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+              <p className="text-white">Loading route comparison data...</p>
             </div>
-            <div className="text-gray-300 text-sm mb-1">Total Hazard Locations</div>
-            <div className="text-4xl font-bold text-white">{potholes.length}</div>
-          </motion.div>
+          ) : routeComparisonError ? (
+            <div className="p-6">
+              <div className="bg-[#e74c3c]/20 border border-[#e74c3c] rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-6 h-6 text-[#e74c3c] flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-white font-semibold mb-1">Error Loading Route Data</p>
+                    <p className="text-gray-300 text-sm mb-3">{routeComparisonError}</p>
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={fetchRouteComparison}
+                      className="px-4 py-2 bg-[#3498db] text-white rounded-lg font-semibold hover:bg-[#2980b9] transition-colors"
+                    >
+                      Retry
+                    </motion.button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : routeComparison ? (
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                {/* Route A Stats */}
+                <motion.div 
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className={`group relative bg-gradient-to-br ${
+                    routeComparison.comparison.preferred_route === 'Route A' 
+                      ? 'from-emerald-500/20 via-emerald-500/10 to-transparent border-emerald-500/40 shadow-lg shadow-emerald-500/20' 
+                      : 'from-blue-500/20 via-blue-500/10 to-transparent border-blue-500/30'
+                  } backdrop-blur-xl rounded-2xl p-6 border-2 transition-all duration-300 overflow-hidden`}
+                >
+                  {routeComparison.comparison.preferred_route === 'Route A' && (
+                    <div className="absolute top-0 right-0 bg-gradient-to-br from-emerald-500 to-green-500 text-white px-3 py-1 rounded-bl-xl text-xs font-bold shadow-lg">
+                      ⭐ PREFERRED
+                    </div>
+                  )}
+                  <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className={`p-2.5 rounded-xl ${
+                        routeComparison.comparison.preferred_route === 'Route A' 
+                          ? 'bg-gradient-to-br from-emerald-500/30 to-green-500/30' 
+                          : 'bg-gradient-to-br from-blue-500/30 to-cyan-500/30'
+                      } border border-blue-500/40`}>
+                        <div className={`w-3 h-3 rounded-full ${
+                          routeComparison.comparison.preferred_route === 'Route A' 
+                            ? 'bg-emerald-400' 
+                            : 'bg-blue-400'
+                        }`}></div>
+                      </div>
+                      <h3 className="text-white font-bold text-xl">Route A</h3>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center p-2 bg-white/5 rounded-lg">
+                        <span className="text-white/70 text-sm font-medium">Total Hazards</span>
+                        <span className="text-white font-bold text-lg">{routeComparison.route_a.statistics.total_hazards}</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-white/5 rounded-lg">
+                        <span className="text-white/70 text-sm font-medium">Total Severity</span>
+                        <span className="text-white font-bold text-lg">{routeComparison.route_a.statistics.total_severity}</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-white/5 rounded-lg">
+                        <span className="text-white/70 text-sm font-medium">Avg Severity</span>
+                        <span className="text-white font-bold text-lg">{routeComparison.route_a.statistics.average_severity}/5</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 rounded-lg border border-blue-500/30">
+                        <span className="text-white/90 text-sm font-semibold">Route Score</span>
+                        <span className="text-white font-bold text-xl">{routeComparison.comparison.route_a_score}</span>
+                      </div>
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <div className="text-white/60 text-xs font-semibold mb-2 uppercase tracking-wide">Hazard Types</div>
+                        <div className="flex flex-wrap gap-2">
+                          {Object.entries(routeComparison.route_a.statistics.hazard_types).map(([type, count]) => (
+                            <span key={type} className="px-3 py-1.5 bg-white/10 backdrop-blur-sm rounded-lg text-xs text-white font-medium border border-white/20">
+                              {type.replace('_', ' ')}: {count}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
 
-          <motion.div 
-            whileHover={{ y: -5 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20"
-          >
-            <div className="mb-2">
-              <MapPin className="w-10 h-10 text-[#3498db]" />
-            </div>
-            <div className="text-gray-300 text-sm mb-1">Recent Reports (7 Days)</div>
-            <div className="text-4xl font-bold text-white">
-              {potholes.filter(p => new Date(p.timestamp) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
-            </div>
-          </motion.div>
+                {/* Route B Stats */}
+                <motion.div 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className={`group relative bg-gradient-to-br ${
+                    routeComparison.comparison.preferred_route === 'Route B' 
+                      ? 'from-emerald-500/20 via-emerald-500/10 to-transparent border-emerald-500/40 shadow-lg shadow-emerald-500/20' 
+                      : 'from-red-500/20 via-red-500/10 to-transparent border-red-500/30'
+                  } backdrop-blur-xl rounded-2xl p-6 border-2 transition-all duration-300 overflow-hidden`}
+                >
+                  {routeComparison.comparison.preferred_route === 'Route B' && (
+                    <div className="absolute top-0 right-0 bg-gradient-to-br from-emerald-500 to-green-500 text-white px-3 py-1 rounded-bl-xl text-xs font-bold shadow-lg">
+                      ⭐ PREFERRED
+                    </div>
+                  )}
+                  <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className={`p-2.5 rounded-xl ${
+                        routeComparison.comparison.preferred_route === 'Route B' 
+                          ? 'bg-gradient-to-br from-emerald-500/30 to-green-500/30' 
+                          : 'bg-gradient-to-br from-red-500/30 to-orange-500/30'
+                      } border border-red-500/40`}>
+                        <div className={`w-3 h-3 rounded-full ${
+                          routeComparison.comparison.preferred_route === 'Route B' 
+                            ? 'bg-emerald-400' 
+                            : 'bg-red-400'
+                        }`}></div>
+                      </div>
+                      <h3 className="text-white font-bold text-xl">Route B</h3>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center p-2 bg-white/5 rounded-lg">
+                        <span className="text-white/70 text-sm font-medium">Total Hazards</span>
+                        <span className="text-white font-bold text-lg">{routeComparison.route_b.statistics.total_hazards}</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-white/5 rounded-lg">
+                        <span className="text-white/70 text-sm font-medium">Total Severity</span>
+                        <span className="text-white font-bold text-lg">{routeComparison.route_b.statistics.total_severity}</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-white/5 rounded-lg">
+                        <span className="text-white/70 text-sm font-medium">Avg Severity</span>
+                        <span className="text-white font-bold text-lg">{routeComparison.route_b.statistics.average_severity}/5</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-gradient-to-r from-red-500/20 to-orange-500/20 rounded-lg border border-red-500/30">
+                        <span className="text-white/90 text-sm font-semibold">Route Score</span>
+                        <span className="text-white font-bold text-xl">{routeComparison.comparison.route_b_score}</span>
+                      </div>
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <div className="text-white/60 text-xs font-semibold mb-2 uppercase tracking-wide">Hazard Types</div>
+                        <div className="flex flex-wrap gap-2">
+                          {Object.entries(routeComparison.route_b.statistics.hazard_types).map(([type, count]) => (
+                            <span key={type} className="px-3 py-1.5 bg-white/10 backdrop-blur-sm rounded-lg text-xs text-white font-medium border border-white/20">
+                              {type.replace('_', ' ')}: {count}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
 
-          <motion.div 
-            whileHover={{ y: -5 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20"
-          >
-            <div className="mb-2">
-              <AlertTriangle className="w-10 h-10 text-[#f39c12]" />
+              {/* Recommendation */}
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="bg-gradient-to-r from-emerald-500/20 via-green-500/15 to-emerald-500/20 backdrop-blur-xl border border-emerald-500/40 rounded-xl p-5 shadow-lg shadow-emerald-500/20"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="p-2 bg-gradient-to-br from-emerald-500/30 to-green-500/30 rounded-xl border border-emerald-500/40">
+                    <AlertTriangle className="w-6 h-6 text-emerald-400 flex-shrink-0" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-white font-bold text-lg mb-2">Recommendation</p>
+                    <p className="text-white/90 text-sm leading-relaxed">{routeComparison.comparison.recommendation}</p>
+                  </div>
+                </div>
+              </motion.div>
+
+              {/* Legend */}
+              {showRouteComparison && (
+                <div className="mt-4 pt-4 border-t border-white/20">
+                  <p className="text-white font-semibold text-sm mb-3">Hazard Type Legend:</p>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 rounded-full bg-[#8b4513] border-2 border-[#3498db] flex items-center justify-center text-white text-xs font-bold">P</div>
+                      <span className="text-gray-300">Pothole (Circle)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 bg-[#f39c12] border-2 border-[#3498db] flex items-center justify-center text-white text-xs font-bold" style={{transform: 'rotate(45deg)'}}>
+                        <span style={{transform: 'rotate(-45deg)'}}>D</span>
+                      </div>
+                      <span className="text-gray-300">Debris (Diamond)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 bg-[#e67e22] border-2 border-[#3498db] rounded flex items-center justify-center text-white text-xs font-bold">⚠</div>
+                      <span className="text-gray-300">Construction (Square)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 bg-[#3498db] border-2 border-[#3498db] flex items-center justify-center text-white text-xs font-bold" style={{clipPath: 'polygon(0% 0%, 100% 0%, 50% 100%)'}}>W</div>
+                      <span className="text-gray-300">Waterlogging (Triangle)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 bg-[#27ae60] border-2 border-[#3498db] flex items-center justify-center text-white text-xs font-bold" style={{clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)'}}>T</div>
+                      <span className="text-gray-300">Fallen Tree (Triangle)</span>
+                    </div>
+                  </div>
+                  <p className="text-gray-400 text-xs mt-3">
+                    💡 Blue border = Route A | Red border = Route B | Marker size indicates severity (larger = more severe)
+                  </p>
+                </div>
+              )}
             </div>
-            <div className="text-gray-300 text-sm mb-1">Active Hazards</div>
-            <div className="text-4xl font-bold text-white">
-              {potholes.filter(p => p.status === 'reported').length}
+          ) : (
+            <div className="p-6 text-center">
+              <p className="text-gray-300">No route comparison data available</p>
             </div>
-          </motion.div>
+          )}
         </motion.div>
 
         {/* Loading and Error States */}
@@ -1226,18 +2343,20 @@ export default function PotholeMap() {
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.15 }}
-          className="bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 mb-6"
+          className="bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-800/50 shadow-xl mb-8 overflow-hidden"
         >
-          <div className="bg-white/5 px-6 py-4 border-b border-white/20 flex items-center justify-between">
-            <h2 className="text-white text-xl font-semibold flex items-center gap-2">
-              <Navigation className="text-[#3498db] w-6 h-6" />
-              Route Planner
-            </h2>
+          <div className="bg-slate-800/50 px-6 py-5 border-b border-slate-800/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-xl backdrop-blur-sm border border-blue-500/30">
+                <Navigation className="text-blue-400 w-5 h-5" />
+              </div>
+              <h2 className="text-white text-2xl font-bold">Route Planner</h2>
+            </div>
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setShowRoutePanel(!showRoutePanel)}
-              className="text-white hover:text-[#3498db] transition-colors"
+              className="p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200"
             >
               {showRoutePanel ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
             </motion.button>
@@ -1246,17 +2365,69 @@ export default function PotholeMap() {
           {showRoutePanel && (
             <div className="p-6 space-y-4">
               {/* Start Location */}
-              <div>
+              <div className="relative">
                 <label className="block text-white text-sm font-semibold mb-2">Start Location</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={startLocation}
-                    onChange={(e) => setStartLocation(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleStartSearch()}
-                    placeholder="Enter start address or click 'Use Current'"
-                    className="flex-1 px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3498db]"
-                  />
+                <div className="flex gap-2 relative">
+                  <div className="flex-1 relative">
+                    <input
+                      ref={startInputRef}
+                      type="text"
+                      value={startLocation}
+                      onChange={(e) => handleStartLocationChange(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                          if (showStartSuggestions && startSuggestions.length > 0) {
+                            handleStartSuggestionSelect(startSuggestions[0]);
+                          } else {
+                            handleStartSearch();
+                          }
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setShowStartSuggestions(false);
+                        }
+                      }}
+                      onFocus={() => {
+                        if (startSuggestions.length > 0) {
+                          setShowStartSuggestions(true);
+                        }
+                      }}
+                      onBlur={() => {
+                        // Delay to allow click on suggestion
+                        setTimeout(() => setShowStartSuggestions(false), 200);
+                      }}
+                      placeholder="Enter start address or click 'Use Current'"
+                      className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3498db]"
+                    />
+                    {/* Autocomplete Dropdown */}
+                    {showStartSuggestions && startSuggestions.length > 0 && (
+                      <div
+                        ref={startSuggestionsRef}
+                        className="absolute z-50 w-full mt-1 bg-slate-900/95 backdrop-blur-xl border border-slate-800/50 rounded-lg shadow-xl max-h-60 overflow-y-auto"
+                      >
+                        {startSuggestions.map((suggestion, index) => (
+                          <div
+                            key={index}
+                            onClick={() => handleStartSuggestionSelect(suggestion)}
+                            className="px-4 py-3 hover:bg-slate-800/50 cursor-pointer border-b border-slate-800/30 last:border-b-0 transition-colors"
+                          >
+                            <div className="flex items-start gap-3">
+                              <MapPin className="w-4 h-4 text-[#3498db] mt-1 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-white text-sm font-medium truncate">
+                                  {suggestion.displayName.split(',')[0]}
+                                </div>
+                                <div className="text-gray-400 text-xs truncate mt-1">
+                                  {suggestion.displayName.split(',').slice(1).join(',').trim() || suggestion.displayName}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
@@ -1283,17 +2454,69 @@ export default function PotholeMap() {
               </div>
 
               {/* End Location */}
-              <div>
+              <div className="relative">
                 <label className="block text-white text-sm font-semibold mb-2">End Location</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={endLocation}
-                    onChange={(e) => setEndLocation(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleEndSearch()}
-                    placeholder="Enter destination address"
-                    className="flex-1 px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3498db]"
-                  />
+                <div className="flex gap-2 relative">
+                  <div className="flex-1 relative">
+                    <input
+                      ref={endInputRef}
+                      type="text"
+                      value={endLocation}
+                      onChange={(e) => handleEndLocationChange(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                          if (showEndSuggestions && endSuggestions.length > 0) {
+                            handleEndSuggestionSelect(endSuggestions[0]);
+                          } else {
+                            handleEndSearch();
+                          }
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setShowEndSuggestions(false);
+                        }
+                      }}
+                      onFocus={() => {
+                        if (endSuggestions.length > 0) {
+                          setShowEndSuggestions(true);
+                        }
+                      }}
+                      onBlur={() => {
+                        // Delay to allow click on suggestion
+                        setTimeout(() => setShowEndSuggestions(false), 200);
+                      }}
+                      placeholder="Enter destination address"
+                      className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3498db]"
+                    />
+                    {/* Autocomplete Dropdown */}
+                    {showEndSuggestions && endSuggestions.length > 0 && (
+                      <div
+                        ref={endSuggestionsRef}
+                        className="absolute z-50 w-full mt-1 bg-slate-900/95 backdrop-blur-xl border border-slate-800/50 rounded-lg shadow-xl max-h-60 overflow-y-auto"
+                      >
+                        {endSuggestions.map((suggestion, index) => (
+                          <div
+                            key={index}
+                            onClick={() => handleEndSuggestionSelect(suggestion)}
+                            className="px-4 py-3 hover:bg-slate-800/50 cursor-pointer border-b border-slate-800/30 last:border-b-0 transition-colors"
+                          >
+                            <div className="flex items-start gap-3">
+                              <MapPin className="w-4 h-4 text-[#e74c3c] mt-1 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-white text-sm font-medium truncate">
+                                  {suggestion.displayName.split(',')[0]}
+                                </div>
+                                <div className="text-gray-400 text-xs truncate mt-1">
+                                  {suggestion.displayName.split(',').slice(1).join(',').trim() || suggestion.displayName}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
@@ -1386,19 +2609,21 @@ export default function PotholeMap() {
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
-          className="bg-white/10 backdrop-blur-lg rounded-2xl overflow-hidden border border-white/20 shadow-2xl"
+          className="bg-slate-900/80 backdrop-blur-xl rounded-2xl overflow-hidden border border-slate-800/50 shadow-xl"
         >
-          <div className="bg-white/5 px-6 py-4 border-b border-white/20">
-            <h2 className="text-white text-xl font-semibold flex items-center gap-2">
-              <MapPin className="text-[#3498db] w-6 h-6" />
-              Interactive Hazard Map
-            </h2>
-            <p className="text-gray-300 text-sm mt-1">
+          <div className="bg-slate-800/50 px-6 py-5 border-b border-slate-800/50">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-xl backdrop-blur-sm border border-blue-500/30">
+                <MapPin className="text-blue-400 w-5 h-5" />
+              </div>
+              <h2 className="text-white text-2xl font-bold">Interactive Hazard Map</h2>
+            </div>
+            <p className="text-white/70 text-sm ml-12">
               Click on markers to view detailed information about each hazard
             </p>
           </div>
           
-          <div ref={mapRef} className="w-full h-[600px] bg-gray-900"></div>
+          <div ref={mapRef} className="w-full h-[600px] bg-slate-900"></div>
         </motion.div>
 
         {/* Hazard List */}

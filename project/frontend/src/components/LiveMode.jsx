@@ -9,8 +9,10 @@ import { Link } from 'react-router-dom';
 import HazardNotifier from './HazardNotifier';
 import NearbyHazardNotifier from './NearbyHazardNotifier';
 import EmergencyBrakeNotifier from './EmergencyBrakeNotifier';
+import RouteHazardNotifier from './RouteHazardNotifier';
 import voiceAlertService, { PRIORITY } from '../services/voiceAlertService';
 import { getRoadHazardMessage, getHazardMessage } from '../config/voiceMessages';
+import { calculateHeadingFromMovement } from '../services/routeHazardProximityService';
 
 export default function LiveMode() {
   const videoRef = useRef(null);
@@ -23,8 +25,11 @@ export default function LiveMode() {
   const [isConnected, setIsConnected] = useState(false);
   const [hazardDetected, setHazardDetected] = useState(false);
   const [currentLocation, setCurrentLocation] = useState(null);
+  const [heading, setHeading] = useState(null);
+  const [routeComparison, setRouteComparison] = useState(null);
   const [hazardDistances, setHazardDistances] = useState([]);
   const [driverLaneHazardCount, setDriverLaneHazardCount] = useState(0);
+  const previousLocationRef = useRef(null);
   const [detectionMode, setDetectionMode] = useState('live');
   const [videoProgress, setVideoProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -56,11 +61,19 @@ export default function LiveMode() {
             lat: position.coords.latitude,
             lng: position.coords.longitude
           };
+          
+          // Use heading from position if available
+          if (position.coords.heading !== null && position.coords.heading !== undefined && !isNaN(position.coords.heading)) {
+            setHeading(position.coords.heading);
+          }
+          
+          previousLocationRef.current = { ...newLocation };
           setCurrentLocation(newLocation);
           
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
-              gps: newLocation
+              gps: newLocation,
+              heading: heading || position.coords.heading
             }));
           }
         },
@@ -92,11 +105,30 @@ export default function LiveMode() {
             lat: position.coords.latitude,
             lng: position.coords.longitude
           };
+          
+          // Calculate heading from movement
+          if (previousLocationRef.current) {
+            const calculatedHeading = calculateHeadingFromMovement(
+              previousLocationRef.current,
+              newLocation
+            );
+            if (calculatedHeading !== null) {
+              setHeading(calculatedHeading);
+            }
+          }
+          
+          previousLocationRef.current = { ...newLocation };
           setCurrentLocation(newLocation);
+          
+          // Use heading from position if available
+          if (position.coords.heading !== null && position.coords.heading !== undefined && !isNaN(position.coords.heading)) {
+            setHeading(position.coords.heading);
+          }
           
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
-              gps: newLocation
+              gps: newLocation,
+              heading: heading || position.coords.heading
             }));
           }
         },
@@ -130,6 +162,27 @@ export default function LiveMode() {
         toast.dismiss(locationWarningToastId);
       }
     };
+  }, []);
+
+  // Fetch route comparison data for proximity detection
+  useEffect(() => {
+    const fetchRouteComparison = async () => {
+      try {
+        const response = await apiClient.get('/api/routes/compare');
+        if (response.data) {
+          setRouteComparison(response.data);
+        }
+      } catch (error) {
+        console.warn('Failed to fetch route comparison data:', error);
+        // RouteHazardNotifier will fallback to API fetch if needed
+      }
+    };
+
+    fetchRouteComparison();
+    // Refresh route data every 5 minutes
+    const interval = setInterval(fetchRouteComparison, 5 * 60 * 1000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const connectWebSocket = (retry = 0) => {
@@ -245,64 +298,55 @@ export default function LiveMode() {
             videoRef.current.style.display = 'none';
           }
 
-          createImageBitmap(blob).then((bitmap) => {
-            if (!canvas || !ctx) return;
-            
-            const containerWidth = container.clientWidth;
-            const containerHeight = container.clientHeight;
-            const imageAspect = bitmap.width / bitmap.height;
-            const containerAspect = containerWidth / containerHeight;
-
-            if (imageAspect > containerAspect) {
-              canvas.width = containerWidth;
-              canvas.height = containerWidth / imageAspect;
-              canvas.style.top = `${(containerHeight - canvas.height) / 2}px`;
-              canvas.style.left = '0';
-            } else {
-              canvas.height = containerHeight;
-              canvas.width = containerHeight * imageAspect;
-              canvas.style.left = `${(containerWidth - canvas.width) / 2}px`;
-              canvas.style.top = '0';
-            }
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-            bitmap.close();
-
-            const fc = frameCounterRef.current;
-            fc.count += 1;
-            const now = performance.now();
-            if (now - fc.lastTs >= 1000) {
-              setFps(fc.count);
-              fc.count = 0;
-              fc.lastTs = now;
-            }
-          }).catch((err) => {
-            console.error('Error creating image bitmap:', err);
-            const img = new Image();
-            img.onload = () => {
-              if (!canvas || !ctx) return;
+          // Optimized rendering - use direct image loading for better performance
+          const img = new Image();
+          const blobUrl = URL.createObjectURL(blob);
+          img.src = blobUrl;
+          img.onload = () => {
+            // Use requestAnimationFrame for smoother rendering
+            requestAnimationFrame(() => {
+              if (!canvas || !ctx) {
+                URL.revokeObjectURL(blobUrl);
+                return;
+              }
               
               const containerWidth = container.clientWidth;
               const containerHeight = container.clientHeight;
               const imageAspect = img.width / img.height;
               const containerAspect = containerWidth / containerHeight;
 
+              // Only resize canvas if dimensions changed (performance optimization)
+              let needsResize = false;
               if (imageAspect > containerAspect) {
-                canvas.width = containerWidth;
-                canvas.height = containerWidth / imageAspect;
-                canvas.style.top = `${(containerHeight - canvas.height) / 2}px`;
-                canvas.style.left = '0';
+                const newWidth = containerWidth;
+                const newHeight = containerWidth / imageAspect;
+                if (canvas.width !== newWidth || canvas.height !== newHeight) {
+                  canvas.width = newWidth;
+                  canvas.height = newHeight;
+                  canvas.style.top = `${(containerHeight - newHeight) / 2}px`;
+                  canvas.style.left = '0';
+                  needsResize = true;
+                }
               } else {
-                canvas.height = containerHeight;
-                canvas.width = containerHeight * imageAspect;
-                canvas.style.left = `${(containerWidth - canvas.width) / 2}px`;
-                canvas.style.top = '0';
+                const newHeight = containerHeight;
+                const newWidth = containerHeight * imageAspect;
+                if (canvas.width !== newWidth || canvas.height !== newHeight) {
+                  canvas.height = newHeight;
+                  canvas.width = newWidth;
+                  canvas.style.left = `${(containerWidth - newWidth) / 2}px`;
+                  canvas.style.top = '0';
+                  needsResize = true;
+                }
               }
 
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              // Only clear if resized, otherwise just draw (faster)
+              if (needsResize) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+              }
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              URL.revokeObjectURL(img.src);
+              
+              // Cleanup blob URL
+              URL.revokeObjectURL(blobUrl);
 
               const fc = frameCounterRef.current;
               fc.count += 1;
@@ -312,13 +356,91 @@ export default function LiveMode() {
                 fc.count = 0;
                 fc.lastTs = now;
               }
-            };
-            img.onerror = (err) => {
-              console.error('Error loading image:', err);
-              URL.revokeObjectURL(img.src);
-            };
-            img.src = URL.createObjectURL(blob);
-          });
+            });
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(blobUrl);
+            // Fallback to createImageBitmap if Image fails
+            createImageBitmap(blob).then((bitmap) => {
+              requestAnimationFrame(() => {
+                if (!canvas || !ctx) {
+                  bitmap.close();
+                  return;
+                }
+                
+                const containerWidth = container.clientWidth;
+                const containerHeight = container.clientHeight;
+                const imageAspect = bitmap.width / bitmap.height;
+                const containerAspect = containerWidth / containerHeight;
+
+                if (imageAspect > containerAspect) {
+                  canvas.width = containerWidth;
+                  canvas.height = containerWidth / imageAspect;
+                  canvas.style.top = `${(containerHeight - canvas.height) / 2}px`;
+                  canvas.style.left = '0';
+                } else {
+                  canvas.height = containerHeight;
+                  canvas.width = containerHeight * imageAspect;
+                  canvas.style.left = `${(containerWidth - canvas.width) / 2}px`;
+                  canvas.style.top = '0';
+                }
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                bitmap.close();
+
+                const fc = frameCounterRef.current;
+                fc.count += 1;
+                const now = performance.now();
+                if (now - fc.lastTs >= 1000) {
+                  setFps(fc.count);
+                  fc.count = 0;
+                  fc.lastTs = now;
+                }
+              });
+            }).catch((err) => {
+              console.error('Error creating image bitmap:', err);
+              const img = new Image();
+              img.onload = () => {
+                if (!canvas || !ctx) return;
+                
+                const containerWidth = container.clientWidth;
+                const containerHeight = container.clientHeight;
+                const imageAspect = img.width / img.height;
+                const containerAspect = containerWidth / containerHeight;
+
+                if (imageAspect > containerAspect) {
+                  canvas.width = containerWidth;
+                  canvas.height = containerWidth / imageAspect;
+                  canvas.style.top = `${(containerHeight - canvas.height) / 2}px`;
+                  canvas.style.left = '0';
+                } else {
+                  canvas.height = containerHeight;
+                  canvas.width = containerHeight * imageAspect;
+                  canvas.style.left = `${(containerWidth - canvas.width) / 2}px`;
+                  canvas.style.top = '0';
+                }
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                URL.revokeObjectURL(img.src);
+
+                const fc = frameCounterRef.current;
+                fc.count += 1;
+                const now = performance.now();
+                if (now - fc.lastTs >= 1000) {
+                  setFps(fc.count);
+                  fc.count = 0;
+                  fc.lastTs = now;
+                }
+              };
+              img.onerror = (err) => {
+                console.error('Error loading image:', err);
+                URL.revokeObjectURL(img.src);
+              };
+              img.src = URL.createObjectURL(blob);
+            });
+          };
         } catch (err) {
           console.error('Error processing frame:', err);
           setError(err.message);
@@ -425,26 +547,77 @@ export default function LiveMode() {
 
       setUploading(true);
       setError(null);
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await apiClient.post('/api/upload-video', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            toast.info(`Uploading: ${percentCompleted}%`);
+      
+      // Use chunked upload for files larger than 10MB for better performance
+      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+      const useChunkedUpload = file.size > 10 * 1024 * 1024; // 10MB threshold
+      
+      if (useChunkedUpload) {
+        // Chunked upload for large files
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const fileId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+          const start = chunkIndex * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const chunk = file.slice(start, end);
+          
+          const formData = new FormData();
+          formData.append('chunk', chunk);
+          formData.append('chunk_index', chunkIndex.toString());
+          formData.append('total_chunks', totalChunks.toString());
+          formData.append('file_id', fileId);
+          formData.append('filename', file.name);
+          
+          const percentCompleted = Math.round(((chunkIndex + 1) * 100) / totalChunks);
+          
+          const response = await apiClient.post('/api/upload-video-chunk', formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+            onUploadProgress: (progressEvent) => {
+              if (progressEvent.total) {
+                const chunkProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                const overallProgress = Math.round((chunkIndex * 100 + chunkProgress) / totalChunks);
+                setVideoProgress(overallProgress);
+                toast.info(`Uploading: ${overallProgress}%`, { autoClose: 1000 });
+              }
+            },
+          });
+          
+          if (response.data.complete) {
+            setDetectionMode('video');
+            toast.success(`Video uploaded successfully: ${response.data.filename}`);
+            if (fileInputRef.current) {
+              fileInputRef.current.value = '';
+            }
+            break;
           }
-        },
-      });
+        }
+      } else {
+        // Standard upload for smaller files
+        const formData = new FormData();
+        formData.append('file', file);
 
-      if (response.data.success) {
-        setDetectionMode('video');
-        toast.success(`Video uploaded successfully: ${response.data.filename}`);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
+        const response = await apiClient.post('/api/upload-video', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              setVideoProgress(percentCompleted);
+              toast.info(`Uploading: ${percentCompleted}%`, { autoClose: 1000 });
+            }
+          },
+        });
+
+        if (response.data.success) {
+          setDetectionMode('video');
+          toast.success(`Video uploaded successfully: ${response.data.filename}`);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
         }
       }
     } catch (error) {
@@ -454,6 +627,7 @@ export default function LiveMode() {
       setError(errorMessage);
     } finally {
       setUploading(false);
+      setVideoProgress(0);
     }
   };
 
@@ -820,6 +994,13 @@ export default function LiveMode() {
         />
 
         <NearbyHazardNotifier currentLocation={currentLocation} />
+
+        <RouteHazardNotifier 
+          currentLocation={currentLocation}
+          heading={heading}
+          routeComparison={routeComparison}
+          enabled={isConnected}
+        />
 
         <EmergencyBrakeNotifier 
           hazardDistances={hazardDistances}
