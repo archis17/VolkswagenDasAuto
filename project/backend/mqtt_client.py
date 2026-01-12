@@ -106,14 +106,24 @@ class MQTTClient:
                 self._client = None
     
     async def ensure_connected(self):
-        """Ensure MQTT connection is active, reconnect if needed"""
+        """
+        Ensure MQTT connection is active, with improved state check and logging.
+        Returns True if connected, False otherwise.
+        """
         if not MQTT_ENABLED:
             return False
-        
-        if not self._connected or not self._client:
+            
+        if self._connected and self._client:
+            return True
+            
+        # If not connected, try to connect (with primitive locking/debouncing in mind)
+        try:
+            logger.info("MQTT detected as disconnected. Attempting to reconnect...")
             await self.connect()
-        
-        return self._connected
+            return self._connected
+        except Exception as e:
+            logger.error(f"Failed to ensure MQTT connection: {e}")
+            return False
     
     async def publish_detection(
         self,

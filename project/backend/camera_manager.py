@@ -11,7 +11,7 @@ class CameraManager:
         self.thread = None
         self.cap = None
         self.camera_available = False
-        self.target_fps = 60  # Target 60 FPS for smoother video
+        self.target_fps = 30  # Target 30 FPS for stable streaming
         self.last_frame_time = 0
         
     def _find_available_camera(self):

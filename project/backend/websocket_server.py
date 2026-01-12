@@ -36,12 +36,14 @@ import mode_state
 # Thread pool for CPU-intensive operations
 executor = ThreadPoolExecutor(max_workers=2)
 
-# WebSocket configuration - optimized for higher FPS and smoother playback
-TARGET_FPS = 60  # Target 60 FPS for smooth video
-FRAME_INTERVAL = 1.0 / TARGET_FPS  # ~0.0167 seconds
-JPEG_QUALITY = 60  # Reduced for faster encoding and smoother streaming
+# WebSocket configuration - optimized for stability and compatibility
+TARGET_FPS = 30  # Target 30 FPS for stable video streaming
+FRAME_INTERVAL = 1.0 / TARGET_FPS  # ~0.033 seconds
+MIN_JPEG_QUALITY = 40
+MAX_JPEG_QUALITY = 80
+JPEG_QUALITY = 65  # Balanced starting quality
 MAX_QUEUE_SIZE = 1  # Reduced queue for lower latency
-FRAME_SKIP_THRESHOLD = 0.05  # Skip frame if encoding takes longer than this
+FRAME_SKIP_THRESHOLD = 0.1  # More lenient skip threshold
 
 def get_current_mode():
     """Get the current detection mode"""
@@ -216,10 +218,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Optimized frame processing - resize for faster encoding/transmission
                     # Use higher resolution for video mode to maintain quality
                     max_width = 1280 if current_mode == "video" else 960
+                    
+                    # Only resize if the frame is wider than the target max_width
                     if vis_frame.shape[1] > max_width:
                         ratio = max_width / float(vis_frame.shape[1])
                         new_size = (int(vis_frame.shape[1] * ratio), int(vis_frame.shape[0] * ratio))
-                        # Use INTER_LINEAR for better quality in video mode
+                        # Use INTER_LINEAR for better quality in video mode, fast INTER_NEAREST for live
                         interpolation = cv2.INTER_LINEAR if current_mode == "video" else cv2.INTER_NEAREST
                         vis_frame = cv2.resize(vis_frame, new_size, interpolation=interpolation)
 
@@ -237,10 +241,18 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Adaptive frame pacing - only adjust for live mode, keep video at native FPS
                     if current_mode != "video":
                         send_time = asyncio.get_event_loop().time() - send_start
-                        if send_time > 0.025:  # If sending takes too long, reduce FPS
-                            frame_interval_s = min(0.05, frame_interval_s + 0.003)  # Increase interval (lower FPS)
-                        elif send_time < 0.008:  # If very fast, can increase FPS
-                            frame_interval_s = max(0.014, frame_interval_s - 0.0005)  # Decrease interval (higher FPS)
+                        
+                        # Adaptive Quality Control
+                        if send_time > 0.05:  # Very slow transmission
+                            JPEG_QUALITY = max(MIN_JPEG_QUALITY, JPEG_QUALITY - 5)
+                        elif send_time < 0.01:  # Very fast, can improve quality
+                            JPEG_QUALITY = min(MAX_JPEG_QUALITY, JPEG_QUALITY + 1)
+                            
+                        # Adaptive FPS Control
+                        if send_time > 0.04:  # If sending takes too long, reduce FPS
+                            frame_interval_s = min(0.1, frame_interval_s + 0.005)  
+                        elif send_time < 0.015:  # If very fast, can increase FPS (up to limit)
+                            frame_interval_s = max(1.0/TARGET_FPS, frame_interval_s - 0.001)
                     # For video mode, keep frame_interval_s at native video FPS (don't adjust)
                 except Exception:
                     # If sending fails (client closed/slow), break the loop to close socket

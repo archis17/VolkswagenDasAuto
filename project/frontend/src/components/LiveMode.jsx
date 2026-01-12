@@ -56,20 +56,20 @@ export default function LiveMode() {
             toast.dismiss(locationWarningToastId);
             locationWarningToastId = null;
           }
-          
+
           const newLocation = {
             lat: position.coords.latitude,
             lng: position.coords.longitude
           };
-          
+
           // Use heading from position if available
           if (position.coords.heading !== null && position.coords.heading !== undefined && !isNaN(position.coords.heading)) {
             setHeading(position.coords.heading);
           }
-          
+
           previousLocationRef.current = { ...newLocation };
           setCurrentLocation(newLocation);
-          
+
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               gps: newLocation,
@@ -105,7 +105,7 @@ export default function LiveMode() {
             lat: position.coords.latitude,
             lng: position.coords.longitude
           };
-          
+
           // Calculate heading from movement
           if (previousLocationRef.current) {
             const calculatedHeading = calculateHeadingFromMovement(
@@ -116,15 +116,15 @@ export default function LiveMode() {
               setHeading(calculatedHeading);
             }
           }
-          
+
           previousLocationRef.current = { ...newLocation };
           setCurrentLocation(newLocation);
-          
+
           // Use heading from position if available
           if (position.coords.heading !== null && position.coords.heading !== undefined && !isNaN(position.coords.heading)) {
             setHeading(position.coords.heading);
           }
-          
+
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               gps: newLocation,
@@ -181,24 +181,41 @@ export default function LiveMode() {
     fetchRouteComparison();
     // Refresh route data every 5 minutes
     const interval = setInterval(fetchRouteComparison, 5 * 60 * 1000);
-    
+
     return () => clearInterval(interval);
   }, []);
 
   const connectWebSocket = (retry = 0) => {
     if (wsRef.current) {
-      try { wsRef.current.onopen = null; wsRef.current.onmessage = null; wsRef.current.onerror = null; wsRef.current.onclose = null; } catch {}
-      try { wsRef.current.close(); } catch {}
+      try { wsRef.current.onopen = null; wsRef.current.onmessage = null; wsRef.current.onerror = null; wsRef.current.onclose = null; } catch { }
+      try { wsRef.current.close(); } catch { }
     }
 
     // Use configured WebSocket URL
     const wsURL = getWebSocketEndpoint();
     wsRef.current = new WebSocket(wsURL);
-    try { wsRef.current.binaryType = 'arraybuffer'; } catch {}
+    try { wsRef.current.binaryType = 'arraybuffer'; } catch { }
+
+    // Watchdog to detect frozen connections
+    const watchdogRef = useRef(null);
+
+    const resetWatchdog = () => {
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+      watchdogRef.current = setTimeout(() => {
+        console.warn("WebSocket watchdog timeout. Reconnecting...");
+        if (wsRef.current) {
+          try { wsRef.current.close(); } catch { }
+        }
+        setIsConnected(false);
+        // Retry connection
+        setTimeout(() => connectWebSocket(retry + 1), 1000);
+      }, 5000); // 5 second timeout (adjust based on expected frame rate)
+    };
 
     wsRef.current.onopen = () => {
       setIsConnected(true);
-      
+      resetWatchdog(); // Start watchdog
+
       if (currentLocation) {
         wsRef.current.send(JSON.stringify({
           gps: {
@@ -210,6 +227,7 @@ export default function LiveMode() {
     };
 
     wsRef.current.onmessage = (e) => {
+      resetWatchdog(); // Alive!
       if (typeof e.data === 'string') {
         try {
           if (e.data === 'ping') return;
@@ -219,30 +237,30 @@ export default function LiveMode() {
           setHazardDetected({ type: parsedData.hazard_type });
           setDriverLaneHazardCount(driverLaneHazardCount);
           setHazardDistances(hazardDistances);
-          
+
           if (parsedData.mode) {
             setDetectionMode(parsedData.mode);
           }
           if (parsedData.video_progress !== undefined) {
             setVideoProgress(parsedData.video_progress);
           }
-    
+
           if (driverLaneHazardCount > 0) {
             if (!alertRef.current) {
               const hazardType = parsedData.hazard_type || 'road hazard';
               const hazardDistance = hazardDistances.length > 0 ? hazardDistances[0]?.distance : null;
-              
+
               const voiceMessage = getHazardMessage(
                 hazardType,
                 hazardDistance ? Math.round(hazardDistance) : null,
                 true
               );
-              
+
               if (voiceMessage && (!lastVoiceAlertRef.current || Date.now() - lastVoiceAlertRef.current > 10000)) {
                 voiceAlertService.hazard(voiceMessage);
                 lastVoiceAlertRef.current = Date.now();
               }
-              
+
               alertRef.current = toast.warning(`⚠️ Road Hazard Detected in Your Lane! \n
                 Reducing Speed ......
                 `, {
@@ -293,7 +311,7 @@ export default function LiveMode() {
           }
 
           const ctx = canvas.getContext('2d');
-          
+
           if (videoRef.current) {
             videoRef.current.style.display = 'none';
           }
@@ -309,7 +327,7 @@ export default function LiveMode() {
                 URL.revokeObjectURL(blobUrl);
                 return;
               }
-              
+
               const containerWidth = container.clientWidth;
               const containerHeight = container.clientHeight;
               const imageAspect = img.width / img.height;
@@ -344,8 +362,8 @@ export default function LiveMode() {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
               }
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              
-              // Cleanup blob URL
+
+              // Cleanup blob URL IMMEDIATELY after drawing to prevent memory leaks
               URL.revokeObjectURL(blobUrl);
 
               const fc = frameCounterRef.current;
@@ -363,83 +381,15 @@ export default function LiveMode() {
             // Fallback to createImageBitmap if Image fails
             createImageBitmap(blob).then((bitmap) => {
               requestAnimationFrame(() => {
+                // ... existing fallback code ...
                 if (!canvas || !ctx) {
                   bitmap.close();
                   return;
                 }
-                
-                const containerWidth = container.clientWidth;
-                const containerHeight = container.clientHeight;
-                const imageAspect = bitmap.width / bitmap.height;
-                const containerAspect = containerWidth / containerHeight;
-
-                if (imageAspect > containerAspect) {
-                  canvas.width = containerWidth;
-                  canvas.height = containerWidth / imageAspect;
-                  canvas.style.top = `${(containerHeight - canvas.height) / 2}px`;
-                  canvas.style.left = '0';
-                } else {
-                  canvas.height = containerHeight;
-                  canvas.width = containerHeight * imageAspect;
-                  canvas.style.left = `${(containerWidth - canvas.width) / 2}px`;
-                  canvas.style.top = '0';
-                }
-
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
                 bitmap.close();
-
-                const fc = frameCounterRef.current;
-                fc.count += 1;
-                const now = performance.now();
-                if (now - fc.lastTs >= 1000) {
-                  setFps(fc.count);
-                  fc.count = 0;
-                  fc.lastTs = now;
-                }
               });
-            }).catch((err) => {
-              console.error('Error creating image bitmap:', err);
-              const img = new Image();
-              img.onload = () => {
-                if (!canvas || !ctx) return;
-                
-                const containerWidth = container.clientWidth;
-                const containerHeight = container.clientHeight;
-                const imageAspect = img.width / img.height;
-                const containerAspect = containerWidth / containerHeight;
-
-                if (imageAspect > containerAspect) {
-                  canvas.width = containerWidth;
-                  canvas.height = containerWidth / imageAspect;
-                  canvas.style.top = `${(containerHeight - canvas.height) / 2}px`;
-                  canvas.style.left = '0';
-                } else {
-                  canvas.height = containerHeight;
-                  canvas.width = containerHeight * imageAspect;
-                  canvas.style.left = `${(containerWidth - canvas.width) / 2}px`;
-                  canvas.style.top = '0';
-                }
-
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                URL.revokeObjectURL(img.src);
-
-                const fc = frameCounterRef.current;
-                fc.count += 1;
-                const now = performance.now();
-                if (now - fc.lastTs >= 1000) {
-                  setFps(fc.count);
-                  fc.count = 0;
-                  fc.lastTs = now;
-                }
-              };
-              img.onerror = (err) => {
-                console.error('Error loading image:', err);
-                URL.revokeObjectURL(img.src);
-              };
-              img.src = URL.createObjectURL(blob);
-            });
+            }).catch((err) => { console.error(err) });
           };
         } catch (err) {
           console.error('Error processing frame:', err);
@@ -449,20 +399,21 @@ export default function LiveMode() {
     };
 
     wsRef.current.onerror = () => {
-      if (retry % 10 === 0) {
-        console.error("WebSocket error. Attempting to reconnect...");
-      }
-      setIsConnected(false);
+      // Error handling
+      if (retry % 5 === 0) console.error("WebSocket error. Attempting to reconnect...");
     };
 
     wsRef.current.onclose = () => {
-      const base = 1000;
-      const maxDelay = 30000;
-      const delay = Math.min(maxDelay, Math.round(base * Math.pow(2, Math.min(retry, 6)) + Math.random() * 500));
-      if (retry % 3 === 0) {
-        console.warn(`WebSocket closed. Reconnecting in ${Math.round(delay/1000)}s...`);
-      }
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
       setIsConnected(false);
+
+      // Exponential backoff with max delay
+      const delay = Math.min(10000, 1000 * Math.pow(1.5, retry));
+
+      if (retry % 3 === 0) {
+        console.warn(`WebSocket closed. Reconnecting in ${Math.round(delay / 1000)}s...`);
+      }
+
       setTimeout(() => connectWebSocket(retry + 1), delay);
     };
   };
@@ -490,12 +441,12 @@ export default function LiveMode() {
           console.error('Error closing WebSocket:', e);
         }
       }
-      
+
       const canvas = document.getElementById('processed-canvas');
       if (canvas) {
         canvas.remove();
       }
-      
+
       const processedImg = document.getElementById('processed-feed');
       if (processedImg) {
         if (processedImg.src) {
@@ -547,30 +498,30 @@ export default function LiveMode() {
 
       setUploading(true);
       setError(null);
-      
+
       // Use chunked upload for files larger than 10MB for better performance
       const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
       const useChunkedUpload = file.size > 10 * 1024 * 1024; // 10MB threshold
-      
+
       if (useChunkedUpload) {
         // Chunked upload for large files
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         const fileId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
+
         for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
           const start = chunkIndex * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, file.size);
           const chunk = file.slice(start, end);
-          
+
           const formData = new FormData();
           formData.append('chunk', chunk);
           formData.append('chunk_index', chunkIndex.toString());
           formData.append('total_chunks', totalChunks.toString());
           formData.append('file_id', fileId);
           formData.append('filename', file.name);
-          
+
           const percentCompleted = Math.round(((chunkIndex + 1) * 100) / totalChunks);
-          
+
           const response = await apiClient.post('/api/upload-video-chunk', formData, {
             headers: {
               'Content-Type': 'multipart/form-data',
@@ -584,7 +535,7 @@ export default function LiveMode() {
               }
             },
           });
-          
+
           if (response.data.complete) {
             setDetectionMode('video');
             toast.success(`Video uploaded successfully: ${response.data.filename}`);
@@ -650,7 +601,7 @@ export default function LiveMode() {
   }
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -666,7 +617,7 @@ export default function LiveMode() {
       </div>
 
       {/* Header */}
-      <motion.div 
+      <motion.div
         initial={{ y: -50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.2 }}
@@ -683,8 +634,8 @@ export default function LiveMode() {
               <span className="font-semibold">Back to Home</span>
             </motion.button>
           </Link>
-          
-          <motion.h1 
+
+          <motion.h1
             className="text-2xl lg:text-3xl font-bold bg-gradient-to-r from-white via-[#3498db] to-white bg-clip-text text-transparent"
             initial={{ scale: 0.9 }}
             animate={{ scale: 1 }}
@@ -692,7 +643,7 @@ export default function LiveMode() {
           >
             Road Hazard Detection
           </motion.h1>
-          
+
           <Link to="/pothole-map">
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -708,20 +659,19 @@ export default function LiveMode() {
 
       <div className="relative z-10 max-w-7xl mx-auto p-6">
         {/* Status Cards - Modern Design */}
-        <motion.div 
+        <motion.div
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
           className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4 mb-6"
         >
           {/* Connection Status */}
-          <motion.div 
+          <motion.div
             whileHover={{ scale: 1.02, y: -2 }}
-            className={`relative overflow-hidden rounded-2xl p-5 border backdrop-blur-xl ${
-              isConnected 
-                ? 'bg-gradient-to-br from-[#2ecc71]/20 to-[#27ae60]/10 border-[#2ecc71]/30' 
+            className={`relative overflow-hidden rounded-2xl p-5 border backdrop-blur-xl ${isConnected
+                ? 'bg-gradient-to-br from-[#2ecc71]/20 to-[#27ae60]/10 border-[#2ecc71]/30'
                 : 'bg-gradient-to-br from-[#e74c3c]/20 to-[#c0392b]/10 border-[#e74c3c]/30'
-            } shadow-xl`}
+              } shadow-xl`}
           >
             <div className="flex items-center justify-between mb-2">
               {isConnected ? (
@@ -738,7 +688,7 @@ export default function LiveMode() {
           </motion.div>
 
           {/* Mode Status */}
-          <motion.div 
+          <motion.div
             whileHover={{ scale: 1.02, y: -2 }}
             className="relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br from-white/10 to-white/5 border border-white/20 backdrop-blur-xl shadow-xl"
           >
@@ -756,7 +706,7 @@ export default function LiveMode() {
           </motion.div>
 
           {/* FPS */}
-          <motion.div 
+          <motion.div
             whileHover={{ scale: 1.02, y: -2 }}
             className="relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br from-white/10 to-white/5 border border-white/20 backdrop-blur-xl shadow-xl"
           >
@@ -769,7 +719,7 @@ export default function LiveMode() {
 
           {/* Video Progress (conditional) */}
           {detectionMode === 'video' && (
-            <motion.div 
+            <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               whileHover={{ scale: 1.02, y: -2 }}
@@ -786,13 +736,12 @@ export default function LiveMode() {
           )}
 
           {/* Lane Hazards */}
-          <motion.div 
+          <motion.div
             whileHover={{ scale: 1.02, y: -2 }}
-            className={`relative overflow-hidden rounded-2xl p-5 border backdrop-blur-xl ${
-              driverLaneHazardCount > 0 
-                ? 'bg-gradient-to-br from-[#e74c3c]/20 to-[#c0392b]/10 border-[#e74c3c]/30' 
+            className={`relative overflow-hidden rounded-2xl p-5 border backdrop-blur-xl ${driverLaneHazardCount > 0
+                ? 'bg-gradient-to-br from-[#e74c3c]/20 to-[#c0392b]/10 border-[#e74c3c]/30'
                 : 'bg-gradient-to-br from-[#2ecc71]/20 to-[#27ae60]/10 border-[#2ecc71]/30'
-            } shadow-xl`}
+              } shadow-xl`}
           >
             <div className="flex items-center justify-between mb-2">
               <AlertTriangle className={`w-5 h-5 ${driverLaneHazardCount > 0 ? 'text-[#e74c3c]' : 'text-[#2ecc71]'}`} />
@@ -805,7 +754,7 @@ export default function LiveMode() {
         </motion.div>
 
         {/* Mode Control Panel - Enhanced */}
-        <motion.div 
+        <motion.div
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
@@ -815,16 +764,15 @@ export default function LiveMode() {
             <Zap className="text-[#f39c12] w-6 h-6" />
             <h2 className="text-white text-xl font-bold">Detection Mode</h2>
           </div>
-          
+
           <div className="flex flex-wrap gap-4 mb-4">
             <motion.button
               whileHover={{ scale: 1.02, y: -2 }}
               whileTap={{ scale: 0.98 }}
-              className={`flex-1 min-w-[180px] px-6 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 ${
-                detectionMode === 'live' 
-                  ? 'bg-gradient-to-r from-[#3498db] to-[#2980b9] text-white shadow-xl shadow-[#3498db]/30' 
+              className={`flex-1 min-w-[180px] px-6 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 ${detectionMode === 'live'
+                  ? 'bg-gradient-to-r from-[#3498db] to-[#2980b9] text-white shadow-xl shadow-[#3498db]/30'
                   : 'bg-white/5 text-gray-300 hover:bg-white/10 border border-white/20'
-              } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={() => handleModeSwitch('live')}
               disabled={uploading}
             >
@@ -835,11 +783,10 @@ export default function LiveMode() {
             <motion.button
               whileHover={{ scale: 1.02, y: -2 }}
               whileTap={{ scale: 0.98 }}
-              className={`flex-1 min-w-[180px] px-6 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 ${
-                detectionMode === 'video' 
-                  ? 'bg-gradient-to-r from-[#9b59b6] to-[#8e44ad] text-white shadow-xl shadow-[#9b59b6]/30' 
+              className={`flex-1 min-w-[180px] px-6 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 ${detectionMode === 'video'
+                  ? 'bg-gradient-to-r from-[#9b59b6] to-[#8e44ad] text-white shadow-xl shadow-[#9b59b6]/30'
                   : 'bg-white/5 text-gray-300 hover:bg-white/10 border border-white/20'
-              } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={() => handleModeSwitch('video')}
               disabled={uploading}
             >
@@ -850,7 +797,7 @@ export default function LiveMode() {
 
           {/* File Upload Controls */}
           {detectionMode === 'video' && (
-            <motion.div 
+            <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-white/10"
@@ -864,20 +811,19 @@ export default function LiveMode() {
                 id="video-upload-input"
                 disabled={uploading}
               />
-              <label 
-                htmlFor="video-upload-input" 
-                className={`flex-1 min-w-[180px] px-6 py-3 rounded-2xl font-bold cursor-pointer transition-all flex items-center justify-center gap-3 ${
-                  uploading 
-                    ? 'bg-white/10 text-gray-400 cursor-not-allowed' 
+              <label
+                htmlFor="video-upload-input"
+                className={`flex-1 min-w-[180px] px-6 py-3 rounded-2xl font-bold cursor-pointer transition-all flex items-center justify-center gap-3 ${uploading
+                    ? 'bg-white/10 text-gray-400 cursor-not-allowed'
                     : 'bg-gradient-to-r from-[#2ecc71] to-[#27ae60] text-white hover:shadow-xl shadow-lg shadow-[#2ecc71]/30'
-                }`}
+                  }`}
               >
                 <Upload className="w-5 h-5" />
                 <span>{uploading ? 'Uploading...' : 'Upload Video'}</span>
               </label>
 
               {videoProgress > 0 && (
-                <motion.button 
+                <motion.button
                   initial={{ scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   whileHover={{ scale: 1.02, y: -2 }}
@@ -896,7 +842,7 @@ export default function LiveMode() {
         {/* Video and Map Grid - Enhanced */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* Processed Stream - Modern Design */}
-          <motion.div 
+          <motion.div
             initial={{ x: -30, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: 0.3 }}
@@ -914,15 +860,15 @@ export default function LiveMode() {
                 <span className="text-white font-semibold">{fps} fps</span>
               </div>
             </div>
-            
-            <div 
+
+            <div
               ref={canvasContainerRef}
               className="relative w-full h-[450px] bg-gradient-to-br from-black/60 to-black/40 overflow-hidden"
             >
               {!isConnected && (
                 <div className="absolute inset-0 flex items-center justify-center z-20">
                   <div className="text-center">
-                    <motion.div 
+                    <motion.div
                       animate={{ rotate: 360 }}
                       transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                       className="w-16 h-16 border-4 border-[#3498db] border-t-transparent rounded-full mx-auto mb-4"
@@ -938,11 +884,11 @@ export default function LiveMode() {
                   </div>
                 </div>
               )}
-              <video 
-                ref={videoRef} 
-                autoPlay 
-                playsInline 
-                muted 
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
                 className="absolute inset-0 w-full h-full object-cover z-0"
                 style={{ display: isConnected ? 'block' : 'none' }}
               />
@@ -962,7 +908,7 @@ export default function LiveMode() {
           </motion.div>
 
           {/* Hazard Map - Enhanced */}
-          <motion.div 
+          <motion.div
             initial={{ x: 30, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: 0.4 }}
@@ -976,7 +922,7 @@ export default function LiveMode() {
                 Hazard Map
               </h3>
             </div>
-            
+
             <iframe
               src="/Map.html"
               title="Road Hazard Map"
@@ -986,7 +932,7 @@ export default function LiveMode() {
           </motion.div>
         </div>
 
-        <HazardNotifier 
+        <HazardNotifier
           isConnected={isConnected}
           hazardDetected={hazardDetected}
           currentLocation={currentLocation}
@@ -995,20 +941,20 @@ export default function LiveMode() {
 
         <NearbyHazardNotifier currentLocation={currentLocation} />
 
-        <RouteHazardNotifier 
+        <RouteHazardNotifier
           currentLocation={currentLocation}
           heading={heading}
           routeComparison={routeComparison}
           enabled={isConnected}
         />
 
-        <EmergencyBrakeNotifier 
+        <EmergencyBrakeNotifier
           hazardDistances={hazardDistances}
           driverLaneHazardCount={driverLaneHazardCount}
         />
       </div>
-      
-      <ToastContainer 
+
+      <ToastContainer
         position="bottom-right"
         theme="dark"
         toastClassName="backdrop-blur-xl bg-white/10 border border-white/20"
